@@ -1,5 +1,7 @@
 import sharp from 'sharp';
 import { dynamicImport } from '../util/dynamic-import';
+import { sniffImageFormat } from '../util/image-format';
+import { ValidationError } from '../errors';
 import { parseEmvco, type DecodedQr } from './parse';
 
 /** Scales (relative to source) at which the WeChat detector is tried. */
@@ -40,11 +42,22 @@ function getScanner(): Promise<Record<string, any>> {
 }
 
 /**
- * Decode a QR code from a slip image (Buffer or image file path) using the
- * OpenCV/WeChat detector. Returns the parsed payload, or null when no QR is
- * found. Camera photos are tried at several scales.
+ * Decode a QR code from a slip image Buffer using the OpenCV/WeChat detector.
+ * Returns the parsed payload, or null when no QR is found.
+ *
+ * Security: only image bytes (Buffer) are accepted — file paths are rejected
+ * so untrusted input can never read local files — and the container format is
+ * sniffed from magic bytes before libvips/sharp is asked to decode anything
+ * (blocks the GIF/TIFF/VIPS decoder CVEs, see SECURITY-AUDIT.md).
+ * Camera photos are tried at several scales.
  */
-export async function decodeQr(image: Buffer | string): Promise<DecodedQr | null> {
+export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
+  if (typeof image === 'string') {
+    throw new ValidationError('decodeQr: pass image bytes as a Buffer, not a file path');
+  }
+  if (!Buffer.isBuffer(image) || !sniffImageFormat(image)) {
+    return null;
+  }
   let width: number;
   let height: number;
   try {

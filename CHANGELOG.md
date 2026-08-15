@@ -2,6 +2,32 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — security hardening
+
+### Fixed
+- **Security:** `bank()` now rejects a non-finite/negative `amount` with
+  `ValidationError`. Previously the `MANUAL`-mode amount was interpolated
+  into the Slip Verify URL path unchecked, allowing path traversal and
+  parameter injection (`/api/slip/{amount}/no_slip`).
+- **Security:** `truemoney()` now always `encodeURIComponent`s the gift
+  code/link into the API path. Codes containing `/`, `..`, `?` or `#` could
+  previously alter the API route (path traversal / query injection).
+- **Security:** `decodeQr()` now accepts image **bytes only** (a string path
+  throws `ValidationError`, preventing arbitrary local file reads) and
+  rejects non-JPEG/PNG/WebP buffers before libvips/sharp is asked to decode —
+  closing the gap in the `SECURITY-AUDIT.md` mitigation for the nested
+  `sharp@0.33.5` libvips CVEs (GIF/TIFF/VIPS decoders).
+- **Security:** `post()` now caps the response body at 32 MiB by default
+  (configurable via `maxBodyBytes`), throwing `HttpError` past the cap
+  instead of buffering an unbounded response.
+- `resolveAmount()` no longer blindly trusts the largest OCR reading: the
+  amount reported by most strategies wins (per-strategy agreement counts are
+  exposed on `AmountResult.counts`), with the largest likely amount as the
+  tie-break — a single misread of an inflated figure can no longer drive the
+  slip lookup on its own.
+- `getSlipAmount()` exposes `counts` (how many strategies reported each
+  amount) on the result — additive, non-breaking.
+
 ## [Unreleased] — v1.0.0 (release preparation)
 
 ### Added

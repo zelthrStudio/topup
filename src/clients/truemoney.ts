@@ -5,8 +5,6 @@ import type { TopupApiResponse } from '../types';
 /** TrueMoney redeem API base URL (override with TMN_API_URL). */
 export const TMN_BASE: string = process.env.TMN_API_URL || 'https://api.zelthr.rest';
 
-const GIFT_URL_RE = /^https?:\/\//i;
-
 /** Thai mobile number: exactly 10 digits (leading zero required). */
 const THAI_PHONE_RE = /^0\d{9}$/;
 
@@ -78,7 +76,9 @@ export async function truemoney(
   if (options?.amount != null && (!Number.isFinite(options.amount) || options.amount < 0)) {
     throw new ValidationError('truemoney: amount must be a non-negative number');
   }
-  const code = GIFT_URL_RE.test(codeOrLink) ? encodeURIComponent(codeOrLink) : codeOrLink;
+  // Always URL-encode the code into the path so user input can never alter
+  // the API route (traversal / extra path segments / query parameters).
+  const code = encodeURIComponent(codeOrLink.trim());
   const res = await post(`${TMN_BASE}/truemoney/${code}/${phone.trim().replace(/\s+/g, '')}`);
 
   if (options?.amount != null && res !== null && typeof res === 'object') {

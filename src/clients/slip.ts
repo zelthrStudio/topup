@@ -97,8 +97,23 @@ async function resolveAmount(image: Buffer): Promise<number> {
   if (!res.success || res.amounts.length === 0) {
     throw new OcrError('bank: amount not found in image');
   }
-  const likely = res.amounts.filter(isLikelyAmount);
-  return Math.max(...(likely.length > 0 ? likely : res.amounts));
+  // Prefer the amount that several strategies agree on (per-strategy counts in
+  // res.counts); tie-break toward the largest. Fall back to the largest
+  // likely amount when nothing agrees, so a single OCR misread of an inflated
+  // figure cannot drive the API lookup on its own.
+  const candidates = res.amounts.filter(isLikelyAmount);
+  const pool = candidates.length > 0 ? candidates : res.amounts;
+  const counts = res.counts ?? {};
+  let best = pool[0];
+  let bestCount = -1;
+  for (const amount of pool) {
+    const count = counts[amount] ?? 1;
+    if (count > bestCount || (count === bestCount && amount > best)) {
+      best = amount;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 /**
@@ -117,6 +132,9 @@ export async function bank(
   const m = String(mode || 'OCR').toUpperCase();
   if (!['OCR', 'LOCALOCR', 'MANUAL'].includes(m)) {
     throw new ValidationError(`bank: unknown mode "${mode}" (use OCR, manual or localOCR)`);
+  }
+  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) {
+    throw new ValidationError('bank: amount must be a non-negative finite number');
   }
   const image = isImageData(data) ? normalizeImage(data) : null;
   const qr = image ? null : data;

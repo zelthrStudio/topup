@@ -15,6 +15,8 @@ export interface AmountResult {
   source?: AmountSource;
   /** Mean recognition confidence of the contributing line(s) (Guten only). */
   confidence?: number;
+  /** How many strategies reported each amount (agreement signal). */
+  counts?: Record<number, number>;
   error?: string;
 }
 
@@ -141,11 +143,15 @@ export async function getSlipAmount(
       };
     }
     const uniqueAmounts = new Set<number>();
+    const agreement = new Map<number, number>();
     let bestSource: AmountSource | undefined;
     let bestConfidence = 0;
     const record = (amounts: number[], source: AmountSource, confidence?: number): void => {
       if (amounts.length === 0) return;
-      amounts.forEach((amount) => uniqueAmounts.add(amount));
+      amounts.forEach((amount) => {
+        uniqueAmounts.add(amount);
+        agreement.set(amount, (agreement.get(amount) ?? 0) + 1);
+      });
       if (confidence !== undefined && confidence > bestConfidence) {
         bestConfidence = confidence;
         bestSource = source;
@@ -211,7 +217,7 @@ export async function getSlipAmount(
         // engine failed — fall through to the full-image strategies
       }
       if (settled()) {
-        return { success: true, amounts: Array.from(uniqueAmounts), source: bestSource, confidence: bestConfidence || undefined };
+        return { success: true, amounts: Array.from(uniqueAmounts), counts: Object.fromEntries(agreement), source: bestSource, confidence: bestConfidence || undefined };
       }
     }
 
@@ -305,7 +311,7 @@ export async function getSlipAmount(
     }
 
     const amounts = Array.from(uniqueAmounts);
-    return { success: amounts.length > 0, amounts, source: bestSource, confidence: bestConfidence || undefined };
+    return { success: amounts.length > 0, amounts, counts: Object.fromEntries(agreement), source: bestSource, confidence: bestConfidence || undefined };
   } catch (error: unknown) {
     return {
       success: false,
