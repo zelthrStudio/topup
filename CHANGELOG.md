@@ -2,6 +2,45 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [1.1.3] — 2026-08-16
+
+### Changed
+- **`bank()` image modes verify through `/api/slip/{amount}/no_slip`.** The QR
+  payload is decoded locally and posted as `qrcode_data` — the slip image is
+  never re-uploaded to the amount route anymore (`/api/slip/{amount}` is no
+  longer used). This applies to `LOCALOCR` and `MANUAL` with an image; an
+  image without a decodable QR now raises `OcrError` with a clear message
+  (previously the image was posted to `/api/slip/{amount}`). `OCR` mode
+  (`/api/slip`) and `MANUAL` with raw QR data are unchanged.
+- **`@zelthr/qrcode` bumped `^0.1.0` → `^0.1.2`.** Picks up the QR-scan WASM
+  fix and the PNG-inflate fix from the generator.
+
+### Fixed
+- **MANUAL amount is authoritative over the QR amount.** When `bank(data,
+  'manual', amount)` is given both a slip image and an explicit amount, the
+  explicit amount is used; a different amount inside the QR no longer
+  silently overrides it (previously the QR amount won and the caller's value
+  was ignored).
+- **Images are detected by magic bytes, not base64 shape** (PNG/JPEG/WebP
+  prefix). Garbage base64 strings are no longer mistaken for slip images,
+  and unpadded / URL-safe (base64url) encodings are accepted.
+- **Lazy loaders reset on rejection.** The `sharp` and QR-scanner singleton
+  promises no longer stay rejected forever after a one-off load failure; the
+  next call retries loading.
+- **OCR digit-run false positive.** An 11+ digit reference number followed by
+  `.00` (e.g. `Ref: 25512636416.00`) no longer reads as a huge amount.
+- **OCR-detected amounts are re-validated** (finite, `0..1e9`, ≤ 2 decimal
+  places) before being placed in the `/api/slip/{amount}/no_slip` URL.
+- **HTTP 2xx with a non-JSON body fails loudly** (`HttpError`) instead of
+  silently returning a raw string that skipped amount verification; an
+  empty-body 2xx is treated as `{}`.
+- **Outbound proxy auto-detection is disabled** (`proxy: null`): env-configured
+  proxies no longer intercept slip-image, gift-code or token traffic.
+- **Slip-check payloads with a short version field are still recognized**
+  (BOT format bump) instead of falling through to the EMVCo parser.
+- **`getQrCodePromptPay` validates `scale`** (must be a finite number ≥ 1) —
+  `scale: 0` previously rendered a zero-width PNG.
+
 ## [1.1.2] — 2026-08-15
 
 ### Fixed
@@ -13,17 +52,6 @@ All notable changes to `@zelthr/topup` will be documented in this file.
   misread amounts (e.g. a 5-baht slip read as 2) and fall back to noisy
   tesseract output. Both the repo and consumers now resolve a single `sharp`
   copy and OCR results match the test suite exactly.
-
-## [Unreleased] — slip verification through the no_slip route
-
-### Changed
-- **`bank()` image modes verify through `/api/slip/{amount}/no_slip`.** The QR
-  payload is decoded locally and posted as `qrcode_data` — the slip image is
-  never re-uploaded to the amount route anymore (`/api/slip/{amount}` is no
-  longer used). This applies to `LOCALOCR` and `MANUAL` with an image; an
-  image without a decodable QR now raises `OcrError` with a clear message
-  (previously the image was posted to `/api/slip/{amount}`). `OCR` mode
-  (`/api/slip`) and `MANUAL` with raw QR data are unchanged.
 
 ## [Unreleased] — PromptPay QR generation
 
