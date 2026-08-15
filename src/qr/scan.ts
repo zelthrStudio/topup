@@ -1,5 +1,5 @@
-import sharp from 'sharp';
 import { dynamicImport } from '../util/dynamic-import';
+import { sharpFactory } from '../util/sharp';
 import { sniffImageFormat, sniffUnsupportedPhoneFormat, UNSUPPORTED_PHONE_FORMAT_MESSAGE } from '../util/image-format';
 import { ValidationError } from '../errors';
 import { parseEmvco, type DecodedQr } from './parse';
@@ -68,6 +68,7 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
   if (!sniffImageFormat(image)) {
     return null;
   }
+  const sharp = await sharpFactory();
   let width: number;
   let height: number;
   try {

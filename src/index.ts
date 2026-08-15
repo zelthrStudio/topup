@@ -38,3 +38,7 @@ export type { AmountResult, AmountSource } from './ocr/amount';
 // QR parsing & decoding
 export { decodeQr, parseEmvco, parseSlipCheck, verifyCrc, crc16ccitt } from './qr';
 export type { EmvcoQr, EmvcoAccount, SlipCheckQr, DecodedQr } from './qr';
+
+// PromptPay QR generation
+export { getQrCodePromptPay, MAX_PROMPTPAY_AMOUNT } from './qr';
+export type { QrCodePromptPayOptions, QrCodePromptPayResult, PromptPayType } from './qr';

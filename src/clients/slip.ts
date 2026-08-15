@@ -5,7 +5,7 @@ import { ValidationError, OcrError } from '../errors';
 import { sniffImageFormat, sniffUnsupportedPhoneFormat, UNSUPPORTED_PHONE_FORMAT_MESSAGE } from '../util/image-format';
 import { isSlipCheckPayload } from '../qr/slipcheck';
 import type { TopupApiResponse } from '../types';
-import sharp from 'sharp';
+import { sharpFactory } from '../util/sharp';
 
 /** Slip Verify bank-slip API base URL (override with SLIP_API_URL). */
 export const SLIP_BASE: string = process.env.SLIP_API_URL || 'https://slip-c.oiio.download';
@@ -86,7 +86,7 @@ async function assertImageBuffer(buf: Buffer): Promise<void> {
   }
   let meta: { width?: number; height?: number };
   try {
-    meta = await sharp(buf).metadata();
+    meta = await (await sharpFactory())(buf).metadata();
   } catch (cause) {
     throw new ValidationError('bank: data is not a valid image', { cause });
   }

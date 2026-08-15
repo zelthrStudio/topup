@@ -2,6 +2,35 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — PromptPay QR generation
+
+### Added
+- **`getQrCodePromptPay(id, options)`** generates PromptPay QR codes via the
+  org's own **`@zelthr/qrcode`** generator: mobile numbers, national ID / tax
+  ID (13 digits) and e-wallet IDs (15 digits) are validated and normalized
+  (BOT 13-digit target format). Returns the EMVCo payload, the QR module
+  matrix and ready-to-render **PNG and SVG** output. Dynamic (amount) and
+  static (no amount) QRs are supported with an optional `maxAmount` override;
+  invalid IDs, amounts or render options throw `ValidationError`.
+- **`MAX_PROMPTPAY_AMOUNT`** — the BOT PromptPay per-transaction limit
+  (`200000` Baht), used as the default `maxAmount`.
+
+### Changed
+- **Next.js / web-framework support.** The package now ships an ESM facade
+  (`dist/index.mjs`) wired through the `exports` map (`import`/`require`
+  conditions) with `sideEffects: false` for tree-shaking — ESM named imports
+  work out of the box in Next.js (route handlers, server components and
+  `'use client'` components), Vite and Node ESM.
+- **Node-only dependencies are now loaded lazily.** `sharp` (libvips),
+  `@zelthr/request`, `tesseract.js`, `node:fs`/`node:path` and the OCR engines
+  load only when their code path is actually called, through dynamic
+  `import()` calls that bundlers cannot see. Importing the package no longer
+  loads any native addon, and browser bundles (which only use
+  `getQrCodePromptPay` / `decodeQr`-adjacent APIs) contain **no** sharp,
+  onnxruntime or tesseract.js code (verified: 31.6 kB Vite client bundle,
+  Next.js client chunks clean). Local OCR / slip-image APIs remain
+  server-only by nature and throw at call time in browsers.
+
 ## [Unreleased] — QR scanning on @zelthr/qrcode
 
 ### Changed

@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import { sharpFactory, type SharpInstance, type SharpFactory } from '../util/sharp';
 import { CROP_PROFILES, DEFAULT_CROP, PROFILES, type BankProfile } from './profiles';
 import { extractAmounts, isLikelyAmount } from './extract';
 import { getOcrInstance, resetOcrInstance, runOCRLines } from './engines/guten';
@@ -50,7 +50,7 @@ interface RawImage extends ImageMeta {
 const MAX_IMAGE_DIMENSION = 16_384;
 const MAX_IMAGE_PIXELS = 40_000_000;
 
-async function decodeRaw(imageBuffer: Buffer): Promise<RawImage> {
+async function decodeRaw(sharp: SharpFactory, imageBuffer: Buffer): Promise<RawImage> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
@@ -70,18 +70,19 @@ async function decodeRaw(imageBuffer: Buffer): Promise<RawImage> {
   return { data, width: info.width, height: info.height, channels: info.channels };
 }
 
-function fromRaw(raw: RawImage): sharp.Sharp {
+function fromRaw(sharp: SharpFactory, raw: RawImage): SharpInstance {
   return sharp(raw.data, { raw: { width: raw.width, height: raw.height, channels: raw.channels } });
 }
 
 async function extractRaw(
+  sharp: SharpFactory,
   raw: RawImage,
   left: number,
   top: number,
   width: number,
   height: number
 ): Promise<RawImage> {
-  const { data, info } = await fromRaw(raw)
+  const { data, info } = await fromRaw(sharp, raw)
     .extract({ left, top, width, height })
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -103,12 +104,12 @@ export async function warmupAmountExtractor(): Promise<void> {
 // getSlipAmount below preserve full-image accuracy when the band misses.
 const FAST_AMOUNT_BAND = { leftPct: 50, topPct: 25, bottomPct: 5, width: 600 };
 
-async function cropAmountBand(raw: RawImage): Promise<RawImage> {
+async function cropAmountBand(sharp: SharpFactory, raw: RawImage): Promise<RawImage> {
   const { width: w, height: h } = raw;
   const left = Math.floor(w * (FAST_AMOUNT_BAND.leftPct / 100));
   const top = Math.floor(h * (FAST_AMOUNT_BAND.topPct / 100));
   const height = h - top - Math.floor(h * (FAST_AMOUNT_BAND.bottomPct / 100));
-  return extractRaw(raw, left, top, w - left, height);
+  return extractRaw(sharp, raw, left, top, w - left, height);
 }
 
 /** Run Guten on a (possibly pipelined) buffer and report the extracted amounts
@@ -129,16 +130,16 @@ async function gutenExtract(
   return { amounts: Array.from(found), confidence: conf > 0 ? conf : undefined };
 }
 
-async function cropImage(raw: RawImage, topPct: number, bottomPct: number): Promise<RawImage> {
+async function cropImage(sharp: SharpFactory, raw: RawImage, topPct: number, bottomPct: number): Promise<RawImage> {
   if (topPct === 0 && bottomPct === 0) return raw;
   const { width: w, height: h } = raw;
   const top = Math.floor(h * (topPct / 100));
   const cropH = Math.max(1, Math.floor(h * (1 - topPct / 100 - bottomPct / 100)));
-  return extractRaw(raw, 0, top, w, cropH);
+  return extractRaw(sharp, raw, 0, top, w, cropH);
 }
 
-function processWithProfile(raw: RawImage, profile: BankProfile): Promise<Buffer> {
-  return fromRaw(raw)
+function processWithProfile(sharp: SharpFactory, raw: RawImage, profile: BankProfile): Promise<Buffer> {
+  return fromRaw(sharp, raw)
     .modulate({ brightness: profile.brightness })
     .linear(profile.contrast, 0)
     .resize({ width: profile.width })
@@ -147,8 +148,8 @@ function processWithProfile(raw: RawImage, profile: BankProfile): Promise<Buffer
     .toBuffer();
 }
 
-function processWithWidth(raw: RawImage, profile: BankProfile, width: number): Promise<Buffer> {
-  return fromRaw(raw)
+function processWithWidth(sharp: SharpFactory, raw: RawImage, profile: BankProfile, width: number): Promise<Buffer> {
+  return fromRaw(sharp, raw)
     .modulate({ brightness: profile.brightness })
     .linear(profile.contrast, 0)
     .resize({ width })
@@ -163,11 +164,11 @@ function processWithWidth(raw: RawImage, profile: BankProfile, width: number): P
 const TESSERACT_MAX_INPUT_DIM = 1600;
 const TESSERACT_TARGET_DIM = 1100;
 
-async function capForTesseract(raw: RawImage): Promise<Buffer> {
+async function capForTesseract(sharp: SharpFactory, raw: RawImage): Promise<Buffer> {
   const maxDim = Math.max(raw.width, raw.height);
-  if (maxDim <= TESSERACT_MAX_INPUT_DIM) return fromRaw(raw).png().toBuffer();
+  if (maxDim <= TESSERACT_MAX_INPUT_DIM) return fromRaw(sharp, raw).png().toBuffer();
   const scale = TESSERACT_TARGET_DIM / maxDim;
-  return fromRaw(raw)
+  return fromRaw(sharp, raw)
     .resize({ width: Math.round(raw.width * scale), height: Math.round(raw.height * scale) })
     .png()
     .toBuffer();
@@ -248,16 +249,17 @@ async function pipeline(
 
     // The compressed source is decoded once; crops, bands, resizes and
     // enhancement profiles all derive from these raw pixels.
-    const source = await decodeRaw(imageBuffer);
+    const sharp = await sharpFactory();
+    const source = await decodeRaw(sharp, imageBuffer);
     const cropped = needsCrop
-      ? await cropImage(source, cropCfg.cropTop, cropCfg.cropBottom)
+      ? await cropImage(sharp, source, cropCfg.cropTop, cropCfg.cropBottom)
       : source;
 
     const bufCache = new Map<string, Promise<Buffer>>();
     const processOnce = (key: string, profile: BankProfile, base: RawImage): Promise<Buffer> => {
       let p = bufCache.get(key);
       if (!p) {
-        p = processWithProfile(base, profile);
+        p = processWithProfile(sharp, base, profile);
         bufCache.set(key, p);
       }
       return p;
@@ -265,7 +267,7 @@ async function pipeline(
     const prep800 = (): Promise<Buffer> => {
       let p = bufCache.get('prep800');
       if (!p) {
-        p = fromRaw(cropped).resize({ width: 800 }).png().toBuffer();
+        p = fromRaw(sharp, cropped).resize({ width: 800 }).png().toBuffer();
         bufCache.set('prep800', p);
       }
       return p;
@@ -293,7 +295,7 @@ async function pipeline(
     if (!options.collectAll) {
       try {
         const { amounts, confidence } = await gutenExtract(
-          processWithWidth(await cropAmountBand(source), primaryProfile, FAST_AMOUNT_BAND.width)
+          processWithWidth(sharp, await cropAmountBand(sharp, source), primaryProfile, FAST_AMOUNT_BAND.width)
         );
         record(amounts, 'fast', confidence, 2);
       } catch {
@@ -322,7 +324,7 @@ async function pipeline(
 
     if (!settled()) {
       try {
-        record(extractAmounts(await runTesseractOCR(await capForTesseract(cropped))), 'tesseract');
+        record(extractAmounts(await runTesseractOCR(await capForTesseract(sharp, cropped))), 'tesseract');
       } catch {
         // engine failed — try the next strategy
       }

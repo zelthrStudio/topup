@@ -1,5 +1,4 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { dynamicImport } from '../../util/dynamic-import';
 
 const TESSERACT_TIMEOUT_MS = 30_000;
 const TESSERACT_SPAWN_TIMEOUT_MS = 60_000;
@@ -28,20 +27,34 @@ function debugLog(...args: unknown[]): void {
 
 export class TesseractTimeoutError extends Error {}
 
-// Prefer a local eng.traineddata next to the package root (offline, no CDN);
-// fall back to the tesseract.js CDN when the file is missing. TESSERACT_LANG_PATH
-// lets bundled consumers (serverless/Electron, where __dirname doesn't point
-// at the package) point at their own traineddata directory.
-const LOCAL_LANG_DIR = (() => {
-  const override = process.env.TESSERACT_LANG_PATH;
-  if (override) {
-    return fs.existsSync(path.join(override, 'eng.traineddata')) ? override : undefined;
+// node:fs / node:path are loaded lazily (and the eng.traineddata location is
+// resolved on first use) so that importing this package never touches Node
+// builtins — browser/edge bundles that only use getQrCodePromptPay etc. must
+// not break on module load. TESSERACT_LANG_PATH lets bundled consumers
+// (serverless/Electron, where __dirname doesn't point at the package) point
+// at their own traineddata directory.
+let langDirPromise: Promise<string | undefined> | null = null;
+
+function resolveLangDir(): Promise<string | undefined> {
+  if (!langDirPromise) {
+    langDirPromise = (async () => {
+      const fs = (await dynamicImport('node:fs')) as typeof import('node:fs');
+      const path = (await dynamicImport('node:path')) as typeof import('node:path');
+      const override = process.env.TESSERACT_LANG_PATH;
+      if (override) {
+        return fs.existsSync(path.join(override, 'eng.traineddata')) ? override : undefined;
+      }
+      const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..');
+      return [path.join(PACKAGE_ROOT, 'assets'), PACKAGE_ROOT].find((dir) =>
+        fs.existsSync(path.join(dir, 'eng.traineddata'))
+      );
+    })().catch((error) => {
+      langDirPromise = null;
+      throw error;
+    });
   }
-  const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..');
-  return [path.join(PACKAGE_ROOT, 'assets'), PACKAGE_ROOT].find((dir) =>
-    fs.existsSync(path.join(dir, 'eng.traineddata'))
-  );
-})();
+  return langDirPromise;
+}
 
 interface TesseractWorker {
   recognize(input: Buffer): Promise<{ data: { text: string } }>;
@@ -61,7 +74,7 @@ let tesseractModulePromise: Promise<TesseractModule> | null = null;
 
 function getTesseractModule(): Promise<TesseractModule> {
   if (!tesseractModulePromise) {
-    tesseractModulePromise = import('tesseract.js')
+    tesseractModulePromise = dynamicImport('tesseract.js')
       .catch((error) => {
         tesseractModulePromise = null;
         throw error;
@@ -72,6 +85,7 @@ function getTesseractModule(): Promise<TesseractModule> {
 }
 
 async function spawnTesseractWorker(): Promise<TesseractWorker> {
+  const LOCAL_LANG_DIR = await resolveLangDir();
   if (!LOCAL_LANG_DIR) {
     // Fail fast instead of silently hitting the tesseract.js CDN: the local
     // traineddata ships with the package, so a missing file means a broken

@@ -1,4 +1,4 @@
-import request from '@zelthr/request';
+import { dynamicImport } from '../util/dynamic-import';
 import { HttpError, TimeoutError, type TopupApiError } from '../errors';
 import type { TopupApiResponse } from '../types';
 
@@ -42,6 +42,30 @@ export interface PostOptions {
   maxBodyBytes?: number;
 }
 
+// @zelthr/request is a Node HTTP client (http1/http2/fetch transports). It is
+// loaded lazily on first request so that importing this package (e.g. in a
+// browser bundle for getQrCodePromptPay) never touches Node-only code.
+interface RequestModule {
+  promise(
+    url: string,
+    options: Record<string, unknown>
+  ): Promise<{ statusCode: number; body: unknown }>;
+}
+
+let requestPromise: Promise<RequestModule> | null = null;
+
+function getRequest(): Promise<RequestModule> {
+  if (!requestPromise) {
+    requestPromise = dynamicImport('@zelthr/request')
+      .then((mod) => (mod.default ?? mod) as RequestModule)
+      .catch((error) => {
+        requestPromise = null;
+        throw error;
+      });
+  }
+  return requestPromise;
+}
+
 /**
  * Shared POST helper used by the truemoney and slip clients.
  *
@@ -53,6 +77,7 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBodyBytes = options?.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
 
+  const request = await getRequest();
   let response: { statusCode: number; body: unknown };
   try {
     response = await request.promise(url, {

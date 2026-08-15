@@ -709,3 +709,70 @@ test('getSlipAmount reports source and confidence for real slips', async (t) => 
     assert.ok(typeof res.confidence === 'number' && res.confidence > 0, 'expected real confidence');
   }
 });
+// --- PromptPay QR generation (getQrCodePromptPay) ---
+
+test('getQrCodePromptPay generates a valid dynamic EMVCo payload (mobile, amount)', async () => {
+  const r = await api().getQrCodePromptPay('0812345678', { amount: 100 });
+  assert.equal(r.type, 'mobile');
+  assert.equal(r.target, '0066812345678');
+  const parsed = api().parseEmvco(r.payload);
+  assert.equal(parsed.crcValid, true);
+  assert.equal(parsed.amount, 100);
+  assert.equal(parsed.pointOfInitiation, '12');
+  assert.deepEqual(parsed.accounts, [{ guid: 'A000000677010111', accountId: '0066812345678' }]);
+  assert.ok(Buffer.isBuffer(r.png) && r.png.length > 0);
+  assert.ok(r.svg.startsWith('<svg'));
+  assert.ok(r.qr.size >= 21 && r.qr.matrix.length === r.qr.size * r.qr.size);
+});
+
+test('getQrCodePromptPay without amount generates a static QR', async () => {
+  const r = await api().getQrCodePromptPay('0812345678');
+  assert.equal(r.payload.includes('010211'), true);
+  assert.equal(r.payload.includes('010111'), true);
+  assert.equal(api().parseEmvco(r.payload).amount, undefined);
+});
+
+test('getQrCodePromptPay detects national ID and e-wallet IDs', async () => {
+  const nat = await api().getQrCodePromptPay('1234567890123');
+  assert.equal(nat.type, 'nationalId');
+  assert.equal(nat.target, '1234567890123');
+  const ew = await api().getQrCodePromptPay('123456789012345');
+  assert.equal(ew.type, 'ewalletId');
+  assert.equal(ew.target, '123456789012345');
+});
+
+test('getQrCodePromptPay normalizes +66 international phone format', async () => {
+  const a = await api().getQrCodePromptPay('+66 81 234 5678');
+  const b = await api().getQrCodePromptPay('0812345678');
+  assert.equal(a.target, b.target);
+  assert.equal(a.target, '0066812345678');
+});
+
+test('getQrCodePromptPay PNG decodes back to the same payload', async () => {
+  const r = await api().getQrCodePromptPay('0891234567', { amount: 250.5 });
+  const q = await api().decodeQr(r.png);
+  assert.ok(q, 'round-trip decode should find the QR');
+  assert.equal(q.payload, r.payload);
+  assert.equal(q.amount, 250.5);
+});
+
+test('getQrCodePromptPay rejects invalid IDs and amounts with ValidationError', async () => {
+  await assert.rejects(() => api().getQrCodePromptPay('12345'), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay(''), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('123456789012'), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('12345678901234'), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { amount: 0 }), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { amount: -5 }), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { amount: 100.001 }), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { amount: 200000.01 }), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay(123), (e) => e instanceof api().ValidationError);
+});
+
+test('getQrCodePromptPay respects the maxAmount override', async () => {
+  const r = await api().getQrCodePromptPay('0812345678', { amount: 250000, maxAmount: 300000 });
+  assert.equal(api().parseEmvco(r.payload).amount, 250000);
+});
+
+test('MAX_PROMPTPAY_AMOUNT is the BOT 200000 Baht limit', () => {
+  assert.equal(api().MAX_PROMPTPAY_AMOUNT, 200000);
+});

@@ -34,6 +34,8 @@ const RUNTIME_EXPORTS = [
   'parseSlipCheck',
   'verifyCrc',
   'crc16ccitt',
+  'getQrCodePromptPay',
+  'MAX_PROMPTPAY_AMOUNT',
 ];
 
 test('all public runtime exports are present', () => {
@@ -45,13 +47,25 @@ test('all public runtime exports are present', () => {
 
 test('all public functions are callable', () => {
   const mod = api();
-  const callables = RUNTIME_EXPORTS.filter((n) => !n.endsWith('_BASE') && n !== 'CROP_PROFILES');
+  const callables = RUNTIME_EXPORTS.filter(
+    (n) => !n.endsWith('_BASE') && n !== 'CROP_PROFILES' && n !== 'MAX_PROMPTPAY_AMOUNT'
+  );
   for (const name of callables) {
     assert.equal(typeof mod[name], 'function', `${name} should be a function`);
   }
   assert.equal(typeof mod.TMN_BASE, 'string');
   assert.equal(typeof mod.SLIP_BASE, 'string');
   assert.ok(typeof mod.CROP_PROFILES, 'object');
+});
+
+test('ESM wrapper (dist/index.mjs) mirrors the CJS surface', async () => {
+  const cjs = api();
+  const esm = await import('../dist/index.mjs');
+  for (const name of RUNTIME_EXPORTS) {
+    assert.ok(name in esm, `missing ESM export: ${name}`);
+    assert.strictEqual(esm[name], cjs[name], `${name} differs between ESM and CJS`);
+  }
+  assert.strictEqual(esm.default, cjs, 'ESM default should be the CJS module');
 });
 
 test('every error class reports the right name, message, and hierarchy', () => {
