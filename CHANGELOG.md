@@ -2,6 +2,24 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — whole-baht OCR amounts
+
+### Fixed
+- **Correctness:** Thai slips that print whole baht without decimals (e.g.
+  "5 บาท") are now extracted — previously `extractAmounts()` only matched
+  `.XX` decimal amounts, so a real "5" was skipped while a date/time line
+  ("14 ก.ย. 69 14:43") could be misread as "6914.43" and sent to the Slip
+  Verify API. Verified end-to-end on a real 5-baht Paotang slip.
+- Whole-baht candidates must be bounded by non-word characters: times
+  ("14:43"), references ("50BPP03857", "25512636416"), account suffixes
+  ("0471") and misread unit words ("U1n" for "บาท") can no longer become
+  amounts.
+- Currency stripping now removes only the `฿` symbol. Deleting a literal
+  "B" forged a fake token boundary (e.g. "50BPP03857" → "50 …") that made
+  reference numbers look like amounts.
+- Amount-band (fast path) detections carry double agreement weight so the
+  region purpose-built for the amount wins ties against full-image noise.
+
 ## [Unreleased] — review-driven correctness & hardening
 
 ### Fixed

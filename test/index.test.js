@@ -197,6 +197,49 @@ test('getSlipAmount extracts amount from slip images via OCR', async (t) => {
   }
 });
 
+test('extractAmounts reads whole-baht amounts and rejects noise', () => {
+  const { extractAmounts } = api();
+  // Whole baht without decimals — real Thai slips print "5 บาท".
+  assert.deepEqual(extractAmounts('5 unn'), [5]);
+  assert.deepEqual(extractAmounts('80 บาท'), [80]);
+  assert.deepEqual(extractAmounts('ยอดเงิน 999 บาท'), [999]);
+  // Whole baht with thousands separators.
+  assert.deepEqual(extractAmounts('1,500 บาท'), [1500]);
+  assert.deepEqual(extractAmounts('100,000'), [100000]);
+  // Decimal forms still work as before.
+  assert.deepEqual(extractAmounts('80.50'), [80.5]);
+  assert.deepEqual(extractAmounts('5.00'), [5]);
+  assert.deepEqual(extractAmounts('0.00'), []);
+  assert.deepEqual(extractAmounts('1,500.00'), [1500]);
+  // Times, references, account suffixes and phone numbers must not match.
+  assert.deepEqual(extractAmounts('14:43'), []);
+  assert.deepEqual(extractAmounts('25512636416'), []);
+  assert.deepEqual(extractAmounts('0471'), []);
+  assert.deepEqual(extractAmounts('0812345678'), []);
+  assert.deepEqual(extractAmounts('5794'), []);
+  assert.deepEqual(extractAmounts('18213'), []);
+  assert.deepEqual(extractAmounts('69.00'), [69]);
+  // References and misread words starting/containing digits must not match.
+  assert.deepEqual(extractAmounts('50BPP03857'), []);
+  assert.deepEqual(extractAmounts('0.00 U1n'), []);
+});
+
+test('Paotang slip (whole-baht 5) extracts 5, not the date/time noise', async (t) => {
+  const file = path.join(__dirname, 'เป๋าตัง.jpg');
+  if (!fs.existsSync(file)) return t.skip('เป๋าตัง.jpg not present');
+  const res = await api().getSlipAmount(fs.readFileSync(file), '006');
+  assert.ok(res.success, 'OCR should succeed on the Paotang slip');
+  assert.ok(res.amounts.includes(5), `expected amount 5, got ${JSON.stringify(res.amounts)}`);
+  assert.ok(!res.amounts.includes(6914.43), 'date/time noise must not be reported as the amount');
+});
+
+test('bank localOCR on the Paotang slip posts /api/slip/5', async (t) => {
+  const file = path.join(__dirname, 'เป๋าตัง.jpg');
+  if (!fs.existsSync(file)) return t.skip('เป๋าตัง.jpg not present');
+  const res = await api().bank(fs.readFileSync(file).toString('base64'), 'localOCR');
+  assert.equal(res.url, '/api/slip/5');
+});
+
 test('bank localOCR resolves real slip images and hits /api/slip/:amount', async (t) => {
   const file1 = path.join(__dirname, 'test1.jpg');
   if (fs.existsSync(file1)) {

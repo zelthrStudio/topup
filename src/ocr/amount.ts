@@ -178,11 +178,11 @@ export async function getSlipAmount(
     const agreement = new Map<number, number>();
     let bestSource: AmountSource | undefined;
     let bestConfidence = 0;
-    const record = (amounts: number[], source: AmountSource, confidence?: number): void => {
+    const record = (amounts: number[], source: AmountSource, confidence?: number, weight = 1): void => {
       if (amounts.length === 0) return;
       amounts.forEach((amount) => {
         uniqueAmounts.add(amount);
-        agreement.set(amount, (agreement.get(amount) ?? 0) + 1);
+        agreement.set(amount, (agreement.get(amount) ?? 0) + weight);
       });
       if (confidence !== undefined && confidence > bestConfidence) {
         bestConfidence = confidence;
@@ -235,13 +235,15 @@ export async function getSlipAmount(
 
     // Fast path: the slip's amount band (bottom-right) is scanned first at a
     // reduced scale. When it settles, we skip the full-image ONNX passes,
-    // which dominate latency (~700-1400ms each on CPU).
+    // which dominate latency (~700-1400ms each on CPU). Band detections carry
+    // double weight: the band is the region purpose-built for the amount, so
+    // its readings must win ties against full-image noise (dates, refs).
     if (!options.collectAll) {
       try {
         const { amounts, confidence } = await gutenExtract(
           processWithWidth(await cropAmountBand(source), primaryProfile, FAST_AMOUNT_BAND.width)
         );
-        record(amounts, 'fast', confidence);
+        record(amounts, 'fast', confidence, 2);
       } catch {
         // engine failed — fall through to the full-image strategies
       }
