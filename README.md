@@ -153,7 +153,7 @@ try {
   ```bash
   npm install-scripts approve onnxruntime-node sharp tesseract.js
   ```
-  or add to `package.json`: `"allowScripts": { "onnxruntime-node": true, "sharp": true, "tesseract.js": true }`.
+  or add to `package.json`: `"allowScripts": { "onnxruntime-node": true, "sharp@0.33.5": true, "tesseract.js": true }`.
 - **OCR offline**: the package ships `eng.traineddata` inside the tarball, so tesseract falls back to its CDN only if that file was removed.
 
 ## Known limitations
@@ -162,10 +162,13 @@ try {
   format is sniffed from magic bytes *before* any libvips decode, which also neutralizes
   the known libvips CVEs in sharp <0.35 (GIF/TIFF/VIPS decoders). See
   [`SECURITY-AUDIT.md`](SECURITY-AUDIT.md) for the full assessment.
-- **`npm audit` on a consumer tree** still reports the nested `sharp@0.33.5` pulled by
-  `@gutenye/ocr-node` (no patched version fits its `^0.33.3` range). Runtime is protected
-  by the format allowlist above; a consumer can optionally add a root-level
-  `overrides` entry for a fully clean audit (documented in `SECURITY-AUDIT.md`).
+- **`npm audit` on a consumer tree** still reports `sharp@0.33.5` (the newest release that
+  fits `@gutenye/ocr-node`'s `^0.33.3` range). This package intentionally aligns its own
+  `sharp` dependency to the same `^0.33.3` range so a consumer install dedupes to exactly
+  one sharp copy (verified: fresh installs resolve a single `0.33.5`). Runtime is protected
+  by the format allowlist above; a consumer who wants a fully clean audit may add a
+  root-level `overrides` entry forcing `sharp@0.35.3` for both copies — that combination is
+  exercised by this repo's own test suite and passes.
 - **Process exit:** local OCR keeps a tesseract worker pool alive; call
   `terminateAmountExtractor()` before the app exits.
 - The package is CommonJS-only; ESM consumers use `import { bank } from '@zelthr/topup'`
