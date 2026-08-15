@@ -24,28 +24,20 @@ const MAX_PIXELS = 40_000_000;
  */
 const MAX_DIM_SCALE_2_THRESHOLD = 1200;
 
-interface ScanResult {
-  text: string | null;
+// @zelthr/qrcode — OpenCV WASM + WeChat QR detector, the org's own
+// zero-dependency scanner (same detector as the previously vendored
+// qr-scanner-wechat). It is ESM-only, so it is loaded lazily through a real
+// dynamic import() (not transpiled to require) to keep this CommonJS package
+// working on Node 20+.
+interface QrcodeModule {
+  scan(input: { data: Uint8ClampedArray; width: number; height: number }): Promise<{ text: string | null }>;
 }
 
-interface ScanInput {
-  data: Uint8ClampedArray;
-  width: number;
-  height: number;
-}
+let scannerPromise: Promise<QrcodeModule> | null = null;
 
-// qr-scanner-wechat — OpenCV WASM + WeChat QR detector, far more tolerant of
-// skewed / low-quality camera photos than jsQR. It is ESM-only, so it is
-// loaded lazily through a real dynamic import() (not transpiled to require)
-// to keep this CommonJS package working on Node 18+.
-let scannerPromise: Promise<Record<string, any>> | null = null;
-
-function getScanner(): Promise<Record<string, any>> {
+function getScanner(): Promise<QrcodeModule> {
   if (!scannerPromise) {
-    scannerPromise = dynamicImport('qr-scanner-wechat').catch((error) => {
-      scannerPromise = null;
-      throw error;
-    });
+    scannerPromise = dynamicImport('@zelthr/qrcode') as Promise<QrcodeModule>;
   }
   return scannerPromise;
 }
@@ -93,7 +85,6 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
   }
 
   const scanner = await getScanner();
-  const scan = scanner.scan as (input: ScanInput) => Promise<ScanResult>;
 
   // Decode the source once to raw RGBA; each scale below is derived from this
   // buffer instead of re-decoding the compressed image per scale.
@@ -125,7 +116,7 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
     }
     // Zero-copy view: cv.imread requires a Uint8ClampedArray and copies it into
     // the WASM heap anyway, so an extra full copy here would be purely additive.
-    let result: ScanResult | null = null;
+    let result: { text: string | null } | null = null;
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -135,7 +126,7 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
     });
     try {
       result = await Promise.race([
-        scan({
+        scanner.scan({
           data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
           width: w,
           height: h,

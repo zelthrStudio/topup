@@ -2,6 +2,16 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — QR scanning on @zelthr/qrcode
+
+### Changed
+- QR image scanning now uses the org's own zero-dependency **`@zelthr/qrcode`**
+  (OpenCV WASM + WeChat QR detector) instead of the vendored
+  `qr-scanner-wechat` dependency — same detector, one fewer third-party
+  runtime dependency. The scanner stays lazily loaded through a real
+  `import()` (the package is ESM-only), so the CommonJS build and first-call
+  latency are unchanged.
+
 ## [v1.0.8] - 2026-08-15 — outbound transport on @zelthr/request
 
 ### Changed
