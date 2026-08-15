@@ -13,7 +13,9 @@ All notable changes to `@zelthr/topup` will be documented in this file.
   (report-1 L-9).
 - **Supply chain:** `sharp` bumped to ^0.35.3 (root and via `overrides`) —
   clears the libvips decode CVEs (CVE-2026-33327/33328/35590/35591) from
-  `npm audit`; the magic-byte sniff gate stays regardless.
+  `npm audit`; the magic-byte sniff gate stays regardless. sharp ≥0.35 needs
+  Node ≥20.9, so **Node 18 support is dropped** (Node 18 is EOL since April
+  2025); `engines` is now `>=20.9` and the CI matrix runs 20/22/24.
 - **DX/security:** HEIC/AVIF inputs (iPhone/Android camera defaults) now
   raise a clear error in `decodeQr` / `getSlipAmount` / `bank()` instead of a
   silent "no QR found" / "unsupported format" (report-1 B18).
