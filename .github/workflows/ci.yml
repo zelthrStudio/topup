@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: node ${{ matrix.node }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 20, 22, 24]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build (typecheck + emit)
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Package
+        run: npm pack
+
+      - name: Consumer smoke test (install tarball, require + import)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          TARBALL=$(ls zelthr*.tgz | head -n1)
+          TMP=$(mktemp -d)
+          cp "$TARBALL" scripts/consumer-smoke/smoke.cjs scripts/consumer-smoke/smoke.mjs test/test1.jpg "$TMP/"
+          cd "$TMP"
+          npm init -y >/dev/null
+          # Allow native install scripts so onnxruntime/sharp are fully set up.
+          node -e "const fs=require('fs');const p=require('./package.json');p.allowScripts={sharp:true,'onnxruntime-node':true,'tesseract.js':true};fs.writeFileSync('./package.json',JSON.stringify(p,null,2))"
+          npm install "./$TARBALL" --no-audit --no-fund --ignore-scripts=false >/dev/null
+          node smoke.cjs
+          node smoke.mjs
