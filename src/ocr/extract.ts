@@ -15,7 +15,7 @@
  * "999" next to "บาท" still matches.
  */
 const AMOUNT_REGEX =
-  /\b(?!0\.00\b)(?<!\.)(\d{1,3}(?:,\d{3})*|\d{4,}|0)\.\d{2}\b(?!\.\d)|(?<![\w:./-])\d{1,3}(?:,\d{3}){1,2}(?![\w:./-])(?!,\d)|(?<![\w:./-])[1-9]\d{0,2}(?![\w:./-])/g;
+  /(?<![\w:./-])(?!0\.00\b)(?<!\.)(\d{1,3}(?:,\d{3})*|\d{4,10}|0)\.\d{2}\b(?!\.\d)|(?<![\w:./-])\d{1,3}(?:,\d{3}){1,2}(?![\w:./-])(?!,\d)|(?<![\w:./-])[1-9]\d{0,2}(?![\w:./-])/g;
 
 /** extractAmounts is public API, but its input is OCR line text (a few dozen
  *  chars). Cap it so an adversarial multi-MB string can't drive the

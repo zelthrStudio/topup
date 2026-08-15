@@ -92,6 +92,11 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
       followRedirect: false,
       // Preserve fetch semantics: advertise and decode gzip responses.
       gzip: true,
+      // Explicitly disable proxy auto-detection (HTTP_PROXY/HTTPS_PROXY env
+      // vars): gift codes, phone numbers, slip images and tokens must never
+      // be routed through an ambient proxy that the operator did not
+      // deliberately configure for this client.
+      proxy: null,
     });
   } catch (err) {
     // The library rejects with ETIMEDOUT / ESOCKETTIMEDOUT on deadline
@@ -140,10 +145,24 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
 
   let payload: TopupApiResponse | string = rawBody as TopupApiResponse | string;
   if (typeof payload === 'string') {
-    try {
-      payload = JSON.parse(payload) as TopupApiResponse | string;
-    } catch {
-      // Not JSON — keep the raw response body.
+    const trimmed = payload.trim();
+    if (trimmed.length === 0) {
+      // Some endpoints return 200 with no body on success; treat it as an
+      // empty JSON object so callers never see a raw empty string.
+      payload = {} as TopupApiResponse;
+    } else {
+      try {
+        payload = JSON.parse(trimmed) as TopupApiResponse | string;
+      } catch {
+        // A 2xx with a non-JSON body is an anomaly (WAF challenge page,
+        // HTML error, proxy interstitial): the exchange did not succeed in
+        // the expected protocol. Fail loudly instead of returning a raw
+        // string that silently skips amount verification.
+        throw new HttpError(`topup: HTTP ${status} response body is not JSON`, {
+          status,
+          body: trimmed.slice(0, MAX_ERROR_BODY_CHARS),
+        });
+      }
     }
   }
   return payload;

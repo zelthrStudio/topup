@@ -121,6 +121,11 @@ export async function getQrCodePromptPay(
     throw new ValidationError('getQrCodePromptPay: PromptPay ID must be a string');
   }
   const { amount, maxAmount, ecc, scale, border, color, background } = options;
+  // A scale of 0 (or NaN/negative) would render a zero-width PNG silently;
+  // reject it up front with a descriptive error.
+  if (scale !== undefined && (!Number.isFinite(scale) || scale < 1)) {
+    throw new ValidationError(`getQrCodePromptPay: scale must be a finite number >= 1 (got ${scale})`);
+  }
   const module = await getPromptPayModule();
   try {
     const checked = module.checkPromptPay(id, { amount, maxAmount });

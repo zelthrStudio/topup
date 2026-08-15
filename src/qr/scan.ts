@@ -37,7 +37,13 @@ let scannerPromise: Promise<QrcodeModule> | null = null;
 
 function getScanner(): Promise<QrcodeModule> {
   if (!scannerPromise) {
-    scannerPromise = dynamicImport('@zelthr/qrcode') as Promise<QrcodeModule>;
+    // A rejected import is not cached: a transient failure (WASM init OOM,
+    // ESM resolution hiccup) must not permanently brick QR decoding until
+    // the process restarts — the next call retries.
+    scannerPromise = (dynamicImport('@zelthr/qrcode') as Promise<QrcodeModule>).catch((error) => {
+      scannerPromise = null;
+      throw error;
+    });
   }
   return scannerPromise;
 }

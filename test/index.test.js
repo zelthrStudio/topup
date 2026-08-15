@@ -69,6 +69,10 @@ const server = http.createServer((req, res) => {
       res.end('plain text response');
       return;
     }
+    if (req.url === '/empty200') {
+      res.end();
+      return;
+    }
     res.end(JSON.stringify({ method: req.method, url: req.url, body: parsed }));
   });
 });
@@ -223,11 +227,16 @@ test('extractAmounts reads whole-baht amounts and rejects noise', () => {
   // Times, references, account suffixes and phone numbers must not match.
   assert.deepEqual(extractAmounts('14:43'), []);
   assert.deepEqual(extractAmounts('25512636416'), []);
+  // Part1 #2: a long digit run with ".00" (reference number) must not read
+  // as a huge amount either — 11+ digit runs are never plausible slip amounts.
+  assert.deepEqual(extractAmounts('Ref: 25512636416.00'), []);
+  assert.deepEqual(extractAmounts('25512636416.00'), []);
   assert.deepEqual(extractAmounts('0471'), []);
   assert.deepEqual(extractAmounts('0812345678'), []);
   assert.deepEqual(extractAmounts('5794'), []);
   assert.deepEqual(extractAmounts('18213'), []);
   assert.deepEqual(extractAmounts('69.00'), [69]);
+  assert.deepEqual(extractAmounts('1500.00'), [1500]);
   // References and misread words starting/containing digits must not match.
   assert.deepEqual(extractAmounts('50BPP03857'), []);
   assert.deepEqual(extractAmounts('0.00 U1n'), []);
@@ -608,10 +617,20 @@ test('oversized error bodies are capped to a 64KB preview', async () => {
   assert.equal(err.bodyPreview.length, 65536, 'preview is capped at 64KB');
 });
 
-test('non-JSON 2xx responses are returned as raw text', async () => {
+test('non-JSON 2xx responses fail loudly (H-2: no silent raw-text pass-through)', async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
-  const res = await api().post(`${base}/raw200`, {});
-  assert.equal(res, 'plain text response');
+  const err = await api()
+    .post(`${base}/raw200`, {})
+    .catch((e) => e);
+  assert.ok(err instanceof api().HttpError);
+  assert.equal(err.status, 200);
+  assert.match(err.message, /not JSON/);
+});
+
+test('empty-body 2xx responses are treated as an empty JSON object', async () => {
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const res = await api().post(`${base}/empty200`, {});
+  assert.deepEqual(res, {});
 });
 
 test('a request that never responds throws TimeoutError', async () => {
@@ -685,6 +704,31 @@ test('a v2-format slip-check QR (new version, 4-digit bank code) still parses', 
   assert.equal(qr.slipCheck.bankCode, '0004');
   assert.equal(qr.slipCheck.reference, '12345678901');
   assert.equal(qr.slipCheck.crcValid, true);
+});
+
+test('slip-check payloads with a short version field are still recognized (M-4)', () => {
+  // BOT format bump with a shorter version value: must stay slip-check, not
+  // silently fall through to the EMVCo parser.
+  const inner = '00' + '05' + '00003' + '01' + '03' + '006' + '02' + '11' + '12345678901';
+  const body = '00' + '31' + inner + '51' + '02' + 'TH';
+  const payload = body + '91' + '04' + api().crc16ccitt(body + '9104');
+  const qr = api().parseEmvco(payload);
+  assert.ok(qr.slipCheck, 'short-version payload must be recognized as slip-check');
+  assert.equal(qr.slipCheck.version, '00003');
+  assert.equal(qr.slipCheck.bankCode, '006');
+  assert.equal(qr.slipCheck.crcValid, true);
+});
+
+test('bank accepts unpadded and URL-safe base64 image data (L-6)', async (t) => {
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
+  const padded = fs.readFileSync(file).toString('base64');
+  // Strip padding and translate +/ to -_ like base64url encoders do.
+  const unpadded = padded.replace(/=+$/, '');
+  const urlSafe = padded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const res = await api().bank(urlSafe, 'manual', 80);
+  assert.equal(res.url, '/api/slip/80/no_slip');
+  assert.equal(res.body.qrcode_data.length > 30, true);
 });
 
 // --- Image limits ---
@@ -800,6 +844,10 @@ test('getQrCodePromptPay rejects invalid IDs and amounts with ValidationError', 
   await assert.rejects(() => api().getQrCodePromptPay('0812345678', { amount: 100.001 }), (e) => e instanceof api().ValidationError);
   await assert.rejects(() => api().getQrCodePromptPay('0812345678', { amount: 200000.01 }), (e) => e instanceof api().ValidationError);
   await assert.rejects(() => api().getQrCodePromptPay(123), (e) => e instanceof api().ValidationError);
+  // M-5: scale 0 / NaN / negative would silently render a zero-width PNG.
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { scale: 0 }), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { scale: NaN }), (e) => e instanceof api().ValidationError);
+  await assert.rejects(() => api().getQrCodePromptPay('0812345678', { scale: -2 }), (e) => e instanceof api().ValidationError);
 });
 
 test('getQrCodePromptPay respects the maxAmount override', async () => {

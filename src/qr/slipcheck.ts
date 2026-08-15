@@ -33,7 +33,10 @@ export function isSlipCheckPayload(payload: string): boolean {
   const len = parseInt(payload.slice(2, 4), 10);
   if (Number.isNaN(len) || len < 4 || 4 + len > payload.length) return false;
   const inner = payload.slice(4, 4 + len);
-  return /^00\d{2}\d{4,}/.test(inner);
+  // The version is matched structurally (\d+) so a BOT format bump that
+  // changes the version value's length still recognizes the payload as a
+  // slip-check QR instead of silently degrading to the EMVCo parser.
+  return /^00\d{2}\d+/.test(inner);
 }
 
 /**

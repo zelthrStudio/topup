@@ -8,7 +8,7 @@ import type { TopupApiResponse } from '../types';
 import { sharpFactory } from '../util/sharp';
 
 /** Slip Verify bank-slip API base URL (override with SLIP_API_URL). */
-export const SLIP_BASE: string = process.env.SLIP_API_URL || 'https://slip-c.oiio.download';
+export const SLIP_BASE: string = process.env.SLIP_API_URL || 'https://api.zelthr.rest';
 
 /**
  * Accepted bank slip modes. The union is closed on purpose: passing anything
@@ -45,8 +45,10 @@ const MAX_DIMENSION = 16_384;
 
 function isImageData(data: string): boolean {
   if (DATA_URI_RE.test(data)) return true;
-  if (data.length % 4 !== 0) return false;
-  return IMAGE_B64_PREFIX_RE.test(data);
+  // Unpadded and URL-safe base64 (`-_` instead of `+/`) are accepted: the
+  // URL-safe alphabet is translated back and only the three supported image
+  // magic-byte prefixes decide image-ness (no length % 4 gate).
+  return IMAGE_B64_PREFIX_RE.test(data.replace(/-/g, '+').replace(/_/g, '/'));
 }
 
 function normalizeImage(data: string): string {
@@ -172,6 +174,22 @@ async function resolveSlip(image: Buffer, knownAmount?: number): Promise<Resolve
 }
 
 /**
+ * Plausible THB slip amount: finite, 0..1e9 (1e9 stays well inside the range
+ * where JS stringifies numbers without exponential notation, so the value can
+ * never mangle the /api/slip/:amt URL) with satang precision of at most 2
+ * decimal places.
+ */
+function isPlausibleAmount(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 1_000_000_000 &&
+    Math.abs(value * 100 - Math.round(value * 100)) <= 1e-6
+  );
+}
+
+/**
  * Verify a bank slip.
  *
  * @param data   Slip image (base64 or data URI) or, in MANUAL mode, raw QR data
@@ -192,18 +210,7 @@ export async function bank(
   if (!['OCR', 'LOCALOCR', 'MANUAL'].includes(m)) {
     throw new ValidationError(`bank: unknown mode "${mode}" (use OCR, manual or localOCR)`);
   }
-  // Max plausible THB slip amount (1e9 stays well inside the range where
-  // JS stringifies numbers without exponential notation) and satang precision
-  // (2 decimal places) — anything else would produce a mangled /api/slip/:amt
-  // URL or a garbage comparison value.
-  if (
-    amount !== undefined &&
-    (typeof amount !== 'number' ||
-      !Number.isFinite(amount) ||
-      amount < 0 ||
-      amount > 1_000_000_000 ||
-      Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-6)
-  ) {
+  if (amount !== undefined && !isPlausibleAmount(amount)) {
     throw new ValidationError('bank: amount must be a finite number between 0 and 1,000,000,000 with at most 2 decimal places');
   }
   const image = !looksLikeQrPayload(data) && isImageData(data) ? normalizeImage(data) : null;
@@ -222,6 +229,9 @@ export async function bank(
     if (!qrcodeData) {
       throw new OcrError('bank: no QR code found in the slip image (the no_slip route needs the QR payload)');
     }
+    if (!isPlausibleAmount(detected)) {
+      throw new OcrError(`bank: OCR amount ${detected} is not a plausible THB slip amount`);
+    }
     return post(`${SLIP_BASE}/api/slip/${detected}/no_slip`, { qrcode_data: qrcodeData, ...CONSENT });
   }
 
@@ -238,6 +248,9 @@ export async function bank(
       amt = resolved.amount;
       if (!resolved.qrcodeData) {
         throw new OcrError('bank: no QR code found in the slip image (the no_slip route needs the QR payload)');
+      }
+      if (!isPlausibleAmount(amt)) {
+        throw new OcrError(`bank: resolved amount ${amt} is not a plausible THB slip amount`);
       }
       qrcodeData = resolved.qrcodeData;
     } else {

@@ -18,7 +18,13 @@ let sharpPromise: Promise<SharpModule> | null = null;
 
 export function getSharp(): Promise<SharpModule> {
   if (!sharpPromise) {
-    sharpPromise = dynamicImport('sharp') as Promise<SharpModule>;
+    // A rejected import is not cached: a transient failure (WASM init OOM,
+    // disk hiccup, antivirus lock) must not permanently brick image
+    // processing until the process restarts — the next call retries.
+    sharpPromise = (dynamicImport('sharp') as Promise<SharpModule>).catch((error) => {
+      sharpPromise = null;
+      throw error;
+    });
   }
   return sharpPromise;
 }
