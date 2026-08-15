@@ -1,6 +1,6 @@
 {
   "name": "@zelthr/topup",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "TrueMoney gift-code redemption and Thai bank-slip verification: QR decode (PromptPay EMVCo + slip-check Mini-QR with CRC validation), local OCR amount extraction, and Slip Verify/TrueMoney API clients.",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -54,18 +54,15 @@
     "@zelthr/qrcode": "^0.1.0",
     "@zelthr/request": "^1.1.2",
     "onnxruntime-node": "1.21.1",
-    "sharp": "^0.35.3",
+    "sharp": "^0.33.3",
     "tesseract.js": "^7.0.0"
-  },
-  "overrides": {
-    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2"
   },
   "allowScripts": {
-    "sharp@0.35.3": true,
+    "sharp@0.33.5": true,
     "onnxruntime-node@1.21.1": true,
     "tesseract.js@7.0.0": true
   }

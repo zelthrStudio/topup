@@ -2,6 +2,18 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [1.1.2] — 2026-08-15
+
+### Fixed
+- **`sharp` dependency aligned with `@gutenye/ocr-node` (`^0.33.3`).** The Guten
+  OCR engine declares `sharp ^0.33.3`; the package previously declared
+  `^0.35.3`, so clean consumer installs pulled a second (nested) `sharp 0.33.x`
+  copy for the engine while the amount pipeline used `0.35.3`. The version
+  mismatch changed Guten's image decoding and could make the fast amount band
+  misread amounts (e.g. a 5-baht slip read as 2) and fall back to noisy
+  tesseract output. Both the repo and consumers now resolve a single `sharp`
+  copy and OCR results match the test suite exactly.
+
 ## [Unreleased] — slip verification through the no_slip route
 
 ### Changed
