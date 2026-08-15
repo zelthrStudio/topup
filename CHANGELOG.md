@@ -2,6 +2,30 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [v1.0.8] - 2026-08-15 — outbound transport on @zelthr/request
+
+### Changed
+- The HTTP client (`post()`, used by `truemoney()` and `bank()`) now sends
+  every request through **`@zelthr/request`** (the monorepo HTTP client,
+  `^1.1.2`) instead of Node's built-in `fetch`. All values are passed as
+  library options: POST method, JSON-serialized body with
+  `Content-Type: application/json`, `timeout`, `maxBytes` (response body
+  budget, default 32 MiB), `followRedirect: false` (never re-POST a slip
+  image / gift code to a redirected host) and `gzip: true` (decode compressed
+  responses).
+
+### Fixed
+- Redirects are no longer transport errors: a 3xx (e.g. 307) arrives as a
+  normal response and surfaces as `HttpError` with the status code — the
+  previous `fetch` `redirect: 'error'` path reported it as a generic
+  "request failed (TypeError)". The body is never re-POSTed (unchanged).
+- Timeout errors are mapped from the library's `ETIMEDOUT` /
+  `ESOCKETTIMEDOUT` to `TimeoutError`; oversized response bodies
+  (`EBODYLIMIT`) map to `HttpError` mentioning the cap. Both keep the
+  redacted-URL error messages (no gift code / phone in logs, M-4).
+- Error-message redaction is now covered by a dedicated timeout-path test
+  (secret path segments must never appear in messages).
+
 ## [v1.0.7] - 2026-08-15 — audit round 3 (report-1: leaks, caps, HEIC, drift)
 
 ### Security

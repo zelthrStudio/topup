@@ -57,7 +57,7 @@ const server = http.createServer((req, res) => {
       );
       return;
     }
-    if (req.url === '/hang') {
+    if (req.url === '/hang' || req.url.includes('hang-secret')) {
       return; // never respond — for timeout tests the client aborts
     }
     if (req.url === '/big-error') {
@@ -362,17 +362,31 @@ test('getSlipAmount honors an overall pipeline deadline', async (t) => {
   assert.match(res.error, /exceeded 1 ms/);
 });
 
-test('clients never follow redirects and redact code/phone from error messages', async () => {
+test('clients never follow redirects (bodies are not re-POSTed)', async () => {
   const err = await api()
     .truemoney('REDIRECT', '0812345678')
     .catch((e) => e);
   assert.ok(err instanceof api().HttpError);
-  assert.match(err.message, /request failed/);
-  // M-4: the URL carries the redeemable gift code and phone number in its
-  // path — error messages must never expose either.
+  // The 307 comes back as a normal response (never followed, so the slip
+  // image / gift code is not re-POSTed) and surfaces as HTTP 307.
+  assert.equal(err.status, 307);
+  assert.match(err.message, /HTTP 307/);
+  // M-4: the redeemable gift code and phone number live in the URL path —
+  // error messages must never expose either.
   assert.doesNotMatch(err.message, /REDIRECT/);
   assert.doesNotMatch(err.message, /0812345678/);
-  assert.match(err.message, /\/truemoney\/…/);
+});
+
+test('timeout errors redact secret path segments (gift code / phone)', async () => {
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const err = await api()
+    .post(`${base}/hang-secret/ABCD1234/0812345678`, {}, { timeoutMs: 200 })
+    .catch((e) => e);
+  assert.ok(err instanceof api().TimeoutError);
+  assert.match(err.message, /timed out/);
+  assert.doesNotMatch(err.message, /ABCD1234/);
+  assert.doesNotMatch(err.message, /0812345678/);
+  assert.match(err.message, /\/hang-secret\/…/);
 });
 
 // --- Input validation ---
