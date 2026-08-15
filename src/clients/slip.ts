@@ -100,17 +100,29 @@ async function assertImageBuffer(buf: Buffer): Promise<void> {
   }
 }
 
+interface ResolvedSlip {
+  amount: number;
+  /** Raw QR payload decoded from the image, or null when no QR was found. */
+  qrcodeData: string | null;
+}
+
 /**
  * Resolve the slip amount locally, QR-first:
  *   1. PromptPay QR (EMVCo tag 54) — exact amount, no OCR needed.
  *   2. Thai slip-check QR — gives the bank code for the OCR crop/profile.
  *   3. Local OCR engines (Guten OCR/ONNX + tesseract fallback).
+ *
+ * The decoded QR payload is returned alongside the amount so callers can send
+ * it through the `/no_slip` route instead of re-uploading the image.
+ * `knownAmount` (MANUAL mode with an explicit amount) skips the OCR chain.
  */
-async function resolveAmount(image: Buffer): Promise<number> {
+async function resolveSlip(image: Buffer, knownAmount?: number): Promise<ResolvedSlip> {
+  let qrcodeData: string | null = null;
   let bankCode: string | undefined;
   try {
     const qr = await decodeQr(image);
     if (qr) {
+      qrcodeData = qr.payload;
       bankCode = qr.slipCheck?.bankCode ?? qr.emvco?.accounts[0]?.bankCode;
       const emv = qr.emvco;
       // Trust the QR amount only when the payload either carries no CRC claim
@@ -118,10 +130,15 @@ async function resolveAmount(image: Buffer): Promise<number> {
       // A payload that claims a CRC but fails it is tampered/corrupt — never
       // let its amount win over what OCR reads from the actual slip.
       const crcOk = emv === undefined || emv.raw['63'] === undefined || emv.crcValid === true;
-      if (crcOk && emv?.amount != null && Number.isFinite(emv.amount)) return emv.amount;
+      if (crcOk && emv?.amount != null && Number.isFinite(emv.amount)) {
+        return { amount: emv.amount, qrcodeData };
+      }
     }
   } catch {
     // QR failed — fall through to OCR.
+  }
+  if (knownAmount !== undefined) {
+    return { amount: knownAmount, qrcodeData };
   }
   const res = await getSlipAmount(image, bankCode, { stopOnLikelyAmount: true });
   if (!res.success || res.amounts.length === 0) {
@@ -144,7 +161,7 @@ async function resolveAmount(image: Buffer): Promise<number> {
       bestCount = count;
     }
   }
-  return best;
+  return { amount: best, qrcodeData };
 }
 
 /**
@@ -154,6 +171,10 @@ async function resolveAmount(image: Buffer): Promise<number> {
  * @param mode   'OCR' (remote slip API), 'LOCALOCR' (QR + local OCR amount, then
  *               slip API), or 'MANUAL' (amount given explicitly or read locally)
  * @param amount Optional explicit amount; required for MANUAL without an image
+ *
+ * Image modes verify through the `/no_slip` route: the QR payload is decoded
+ * locally and posted as `qrcode_data` (the image is never re-uploaded with the
+ * amount). An image without a decodable QR raises `OcrError`.
  */
 export async function bank(
   data: string,
@@ -179,7 +200,6 @@ export async function bank(
     throw new ValidationError('bank: amount must be a finite number between 0 and 1,000,000,000 with at most 2 decimal places');
   }
   const image = !looksLikeQrPayload(data) && isImageData(data) ? normalizeImage(data) : null;
-  const qr = image ? null : data;
 
   if (m === 'OCR') {
     if (!image) throw new ValidationError('bank: OCR mode requires image data (base64 or data URI)');
@@ -191,25 +211,34 @@ export async function bank(
     if (!image) throw new ValidationError('bank: localOCR mode requires image data');
     const buf = dataUriToBuffer(image);
     await assertImageBuffer(buf);
-    const detected = await resolveAmount(buf);
-    return post(`${SLIP_BASE}/api/slip/${detected}`, { img: image, ...CONSENT });
+    const { amount: detected, qrcodeData } = await resolveSlip(buf);
+    if (!qrcodeData) {
+      throw new OcrError('bank: no QR code found in the slip image (the no_slip route needs the QR payload)');
+    }
+    return post(`${SLIP_BASE}/api/slip/${detected}/no_slip`, { qrcode_data: qrcodeData, ...CONSENT });
   }
 
   if (m === 'MANUAL') {
-    let amt = amount;
     let buf: Buffer | undefined;
     if (image) {
       buf = dataUriToBuffer(image);
       await assertImageBuffer(buf);
     }
-    if (amt == null) {
-      if (!buf) throw new ValidationError('bank: manual mode without amount requires image data (or pass amount)');
-      amt = await resolveAmount(buf);
-    }
+    let amt: number;
+    let qrcodeData: string;
     if (buf) {
-      return post(`${SLIP_BASE}/api/slip/${amt}`, { img: image, ...CONSENT });
+      const resolved = await resolveSlip(buf, amount);
+      amt = resolved.amount;
+      if (!resolved.qrcodeData) {
+        throw new OcrError('bank: no QR code found in the slip image (the no_slip route needs the QR payload)');
+      }
+      qrcodeData = resolved.qrcodeData;
+    } else {
+      if (amount == null) throw new ValidationError('bank: manual mode without amount requires image data (or pass amount)');
+      amt = amount;
+      qrcodeData = data;
     }
-    return post(`${SLIP_BASE}/api/slip/${amt}/no_slip`, { qrcode_data: qr, ...CONSENT });
+    return post(`${SLIP_BASE}/api/slip/${amt}/no_slip`, { qrcode_data: qrcodeData, ...CONSENT });
   }
   throw new Error(`bank: unreachable mode "${mode}"`);
 }

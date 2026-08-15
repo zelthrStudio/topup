@@ -2,6 +2,17 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — slip verification through the no_slip route
+
+### Changed
+- **`bank()` image modes verify through `/api/slip/{amount}/no_slip`.** The QR
+  payload is decoded locally and posted as `qrcode_data` — the slip image is
+  never re-uploaded to the amount route anymore (`/api/slip/{amount}` is no
+  longer used). This applies to `LOCALOCR` and `MANUAL` with an image; an
+  image without a decodable QR now raises `OcrError` with a clear message
+  (previously the image was posted to `/api/slip/{amount}`). `OCR` mode
+  (`/api/slip`) and `MANUAL` with raw QR data are unchanged.
+
 ## [Unreleased] — PromptPay QR generation
 
 ### Added

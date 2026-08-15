@@ -124,11 +124,9 @@ test('bank manual with qrcode data hits no_slip endpoint', async () => {
   assert.equal(res.body.qrcode_data, '004010123456789');
 });
 
-test('bank manual with image hits /api/slip/:amount', async () => {
+test('bank manual with image without a decodable QR throws (no_slip route only)', async () => {
   const img = TINY_PNG;
-  const res = await api().bank(img, 'manual', 50);
-  assert.equal(res.url, '/api/slip/50');
-  assert.equal(res.body.img, img);
+  await assert.rejects(() => api().bank(img, 'manual', 50), /no QR code found/);
 });
 
 test('bank OCR requires image data', async () => {
@@ -248,25 +246,26 @@ test('Paotang slip (whole-baht 5) extracts 5, not the date/time noise', async (t
   assert.ok(!res.amounts.includes(6914.43), 'date/time noise must not be reported as the amount');
 });
 
-test('bank localOCR on the Paotang slip posts /api/slip/5', async (t) => {
+test('bank localOCR on the Paotang slip posts qrcode_data to /api/slip/5/no_slip', async (t) => {
   const file = path.join(__dirname, 'เป๋าตัง.jpg');
   if (!fs.existsSync(file)) return t.skip('เป๋าตัง.jpg not present');
   const res = await api().bank(fs.readFileSync(file).toString('base64'), 'localOCR');
-  assert.equal(res.url, '/api/slip/5');
+  assert.equal(res.url, '/api/slip/5/no_slip');
+  assert.ok(res.body.qrcode_data && !res.body.img, 'qrcode_data sent, image not re-uploaded');
 });
 
-test('bank localOCR resolves real slip images and hits /api/slip/:amount', async (t) => {
+test('bank localOCR resolves real slip images and hits /no_slip routes', async (t) => {
   const file1 = path.join(__dirname, 'test1.jpg');
   if (fs.existsSync(file1)) {
     const res1 = await api().bank(fs.readFileSync(file1).toString('base64'), 'localOCR');
-    assert.equal(res1.url, '/api/slip/80');
+    assert.equal(res1.url, '/api/slip/80/no_slip');
     assert.equal(res1.body.tos, true);
   }
 
   const file2 = path.join(__dirname, 'test.jpg');
   if (fs.existsSync(file2)) {
     const res2 = await api().bank(fs.readFileSync(file2).toString('base64'), 'localOCR');
-    assert.equal(res2.url, '/api/slip/500');
+    assert.equal(res2.url, '/api/slip/500/no_slip');
     assert.equal(res2.body.tos, true);
   }
 });
@@ -452,12 +451,13 @@ test('bank localOCR rejects non-image base64 data', async () => {
   await assert.rejects(() => api().bank(fake, 'localOCR'), /not a valid image/);
 });
 
-test('bank manual accepts real images and rejects garbage', async (t) => {
+test('bank manual with a real slip image posts qrcode_data to /no_slip', async (t) => {
   const file = path.join(__dirname, 'test1.jpg');
   if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
   const img = fs.readFileSync(file).toString('base64');
   const res = await api().bank(img, 'manual', 80);
-  assert.equal(res.url, '/api/slip/80');
+  assert.equal(res.url, '/api/slip/80/no_slip');
+  assert.ok(res.body.qrcode_data && res.body.qrcode_data.length > 30, 'qrcode_data should be the decoded QR payload');
   // Must exceed the 600-char base64 heuristic to be treated as image data.
   const fake = Buffer.from('garbage bytes that are not an image at all').toString('base64').repeat(20);
   assert.ok(fake.length > 600, 'garbage must pass the base64 heuristic');
