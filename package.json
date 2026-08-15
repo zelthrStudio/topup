@@ -39,6 +39,14 @@
     "verification"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zelthrStudio/topup.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "dependencies": {
     "@gutenye/ocr-node": "^1.4.8",
     "onnxruntime-node": "1.21.1",
