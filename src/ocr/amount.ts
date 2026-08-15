@@ -30,6 +30,41 @@ interface ImageMeta {
   height: number;
 }
 
+// Decoded-to-raw representation. The compressed source is decoded ONCE per
+// getSlipAmount() call and every pipeline step (crop / band / resize /
+// enhancement) is derived from these pixels — previously each sharp() step
+// re-decoded the full camera photo, i.e. 6-10 full JPEG decodes per call.
+interface RawImage extends ImageMeta {
+  data: Buffer;
+  channels: 1 | 2 | 3 | 4;
+}
+
+async function decodeRaw(imageBuffer: Buffer): Promise<RawImage> {
+  const { data, info } = await sharp(imageBuffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: info.channels };
+}
+
+function fromRaw(raw: RawImage): sharp.Sharp {
+  return sharp(raw.data, { raw: { width: raw.width, height: raw.height, channels: raw.channels } });
+}
+
+async function extractRaw(
+  raw: RawImage,
+  left: number,
+  top: number,
+  width: number,
+  height: number
+): Promise<RawImage> {
+  const { data, info } = await fromRaw(raw)
+    .extract({ left, top, width, height })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: info.channels };
+}
+
 // OCR engines initialize lazily on first use: importing this package (e.g. by
 // consumers who only call truemoney()/bank() remote modes) never loads the
 // ONNX models or spawns the ~200MB tesseract worker pool. Call
@@ -39,23 +74,18 @@ export async function warmupAmountExtractor(): Promise<void> {
   await warmupTesseract();
 }
 
-async function getImageMeta(imageBuffer: Buffer): Promise<ImageMeta> {
-  const meta = await sharp(imageBuffer).metadata();
-  return { width: meta.width ?? 1, height: meta.height ?? 1 };
-}
-
 // Thai bank slips print the big bold amount digits in the bottom-right band.
 // OCR-ing only that band at a reduced scale is much faster because the ONNX
 // detection cost scales with input pixels (see engines/guten). Fallbacks in
 // getSlipAmount below preserve full-image accuracy when the band misses.
 const FAST_AMOUNT_BAND = { leftPct: 50, topPct: 25, bottomPct: 5, width: 600 };
 
-async function cropAmountBand(imageBuffer: Buffer, meta?: ImageMeta): Promise<Buffer> {
-  const { width: w, height: h } = meta ?? (await getImageMeta(imageBuffer));
+async function cropAmountBand(raw: RawImage): Promise<RawImage> {
+  const { width: w, height: h } = raw;
   const left = Math.floor(w * (FAST_AMOUNT_BAND.leftPct / 100));
   const top = Math.floor(h * (FAST_AMOUNT_BAND.topPct / 100));
   const height = h - top - Math.floor(h * (FAST_AMOUNT_BAND.bottomPct / 100));
-  return sharp(imageBuffer).extract({ left, top, width: w - left, height }).toBuffer();
+  return extractRaw(raw, left, top, w - left, height);
 }
 
 /** Run Guten on a (possibly pipelined) buffer and report the extracted amounts
@@ -76,29 +106,31 @@ async function gutenExtract(
   return { amounts: Array.from(found), confidence: conf > 0 ? conf : undefined };
 }
 
-async function cropImage(imageBuffer: Buffer, topPct: number, bottomPct: number, meta?: ImageMeta): Promise<Buffer> {
-  if (topPct === 0 && bottomPct === 0) return imageBuffer;
-  const { width: w, height: h } = meta ?? (await getImageMeta(imageBuffer));
+async function cropImage(raw: RawImage, topPct: number, bottomPct: number): Promise<RawImage> {
+  if (topPct === 0 && bottomPct === 0) return raw;
+  const { width: w, height: h } = raw;
   const top = Math.floor(h * (topPct / 100));
   const cropH = Math.max(1, Math.floor(h * (1 - topPct / 100 - bottomPct / 100)));
-  return sharp(imageBuffer).extract({ left: 0, top, width: w, height: cropH }).toBuffer();
+  return extractRaw(raw, 0, top, w, cropH);
 }
 
-function processWithProfile(buf: Buffer, profile: BankProfile): Promise<Buffer> {
-  return sharp(buf)
+function processWithProfile(raw: RawImage, profile: BankProfile): Promise<Buffer> {
+  return fromRaw(raw)
     .modulate({ brightness: profile.brightness })
     .linear(profile.contrast, 0)
     .resize({ width: profile.width })
     .threshold(profile.threshold)
+    .png()
     .toBuffer();
 }
 
-function processWithWidth(buf: Buffer, profile: BankProfile, width: number): Promise<Buffer> {
-  return sharp(buf)
+function processWithWidth(raw: RawImage, profile: BankProfile, width: number): Promise<Buffer> {
+  return fromRaw(raw)
     .modulate({ brightness: profile.brightness })
     .linear(profile.contrast, 0)
     .resize({ width })
     .threshold(profile.threshold)
+    .png()
     .toBuffer();
 }
 
@@ -108,13 +140,13 @@ function processWithWidth(buf: Buffer, profile: BankProfile, width: number): Pro
 const TESSERACT_MAX_INPUT_DIM = 1600;
 const TESSERACT_TARGET_DIM = 1100;
 
-async function capForTesseract(imageBuffer: Buffer, meta?: ImageMeta): Promise<Buffer> {
-  const { width: w, height: h } = meta ?? (await getImageMeta(imageBuffer));
-  const maxDim = Math.max(w, h);
-  if (maxDim <= TESSERACT_MAX_INPUT_DIM) return imageBuffer;
+async function capForTesseract(raw: RawImage): Promise<Buffer> {
+  const maxDim = Math.max(raw.width, raw.height);
+  if (maxDim <= TESSERACT_MAX_INPUT_DIM) return fromRaw(raw).png().toBuffer();
   const scale = TESSERACT_TARGET_DIM / maxDim;
-  return sharp(imageBuffer)
-    .resize({ width: Math.round(w * scale), height: Math.round(h * scale) })
+  return fromRaw(raw)
+    .resize({ width: Math.round(raw.width * scale), height: Math.round(raw.height * scale) })
+    .png()
     .toBuffer();
 }
 
@@ -161,13 +193,16 @@ export async function getSlipAmount(
     const cropCfg = CROP_PROFILES[bankCode ?? ''] ?? DEFAULT_CROP;
     const primaryProfile = PROFILES[cropCfg.profile] ?? PROFILES.default;
     const needsCrop = cropCfg.cropTop > 0 || cropCfg.cropBottom > 0;
-    const meta = needsCrop ? await getImageMeta(imageBuffer) : undefined;
+
+    // The compressed source is decoded once; crops, bands, resizes and
+    // enhancement profiles all derive from these raw pixels.
+    const source = await decodeRaw(imageBuffer);
     const cropped = needsCrop
-      ? await cropImage(imageBuffer, cropCfg.cropTop, cropCfg.cropBottom, meta)
-      : imageBuffer;
+      ? await cropImage(source, cropCfg.cropTop, cropCfg.cropBottom)
+      : source;
 
     const bufCache = new Map<string, Promise<Buffer>>();
-    const processOnce = (key: string, profile: BankProfile, base: Buffer): Promise<Buffer> => {
+    const processOnce = (key: string, profile: BankProfile, base: RawImage): Promise<Buffer> => {
       let p = bufCache.get(key);
       if (!p) {
         p = processWithProfile(base, profile);
@@ -178,7 +213,7 @@ export async function getSlipAmount(
     const prep800 = (): Promise<Buffer> => {
       let p = bufCache.get('prep800');
       if (!p) {
-        p = sharp(cropped).resize({ width: 800 }).toBuffer();
+        p = fromRaw(cropped).resize({ width: 800 }).png().toBuffer();
         bufCache.set('prep800', p);
       }
       return p;
@@ -204,13 +239,7 @@ export async function getSlipAmount(
     if (!options.collectAll) {
       try {
         const { amounts, confidence } = await gutenExtract(
-          Promise.resolve(
-            processWithWidth(
-              await cropAmountBand(imageBuffer, meta),
-              primaryProfile,
-              FAST_AMOUNT_BAND.width
-            )
-          )
+          processWithWidth(await cropAmountBand(source), primaryProfile, FAST_AMOUNT_BAND.width)
         );
         record(amounts, 'fast', confidence);
       } catch {
@@ -239,7 +268,7 @@ export async function getSlipAmount(
 
     if (!settled()) {
       try {
-        record(extractAmounts(await runTesseractOCR(await capForTesseract(cropped, meta))), 'tesseract');
+        record(extractAmounts(await runTesseractOCR(await capForTesseract(cropped))), 'tesseract');
       } catch {
         // engine failed — try the next strategy
       }
@@ -291,7 +320,7 @@ export async function getSlipAmount(
     if (!settled() && needsCrop) {
       try {
         const { amounts, confidence } = await gutenExtract(
-          processOnce('full:default', PROFILES.default, imageBuffer)
+          processOnce('full:default', PROFILES.default, source)
         );
         record(amounts, 'guten', confidence);
       } catch {
@@ -302,7 +331,7 @@ export async function getSlipAmount(
     if (!settled()) {
       try {
         record(
-          extractAmounts(await runTesseractOCR(await processOnce('full:default', PROFILES.default, imageBuffer))),
+          extractAmounts(await runTesseractOCR(await processOnce('full:default', PROFILES.default, source))),
           'tesseract'
         );
       } catch {

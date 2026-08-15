@@ -2,6 +2,21 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — hardening & OCR performance
+
+### Fixed
+- **Security:** EMVCo tag-54 amounts are trusted only when they parse to a
+  finite number greater than zero — a `NaN`/zero/garbage tag can no longer
+  reach amount checks or the Slip Verify URL. `resolveAmount()` additionally
+  guards against a non-finite QR amount before preferring it.
+
+### Changed
+- `getSlipAmount()` now decodes the slip image **once** to raw RGBA pixels and
+  derives every crop/band/resize/enhancement step from that single decode
+  (previously each sharp() step re-decoded the full camera photo, i.e. 6–10
+  full JPEG decodes per call). Measured ~437 ms per call warm (was dominated
+  by repeated decodes).
+
 ## [Unreleased] — security hardening
 
 ### Fixed

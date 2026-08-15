@@ -42,13 +42,22 @@ export function parseEmvcoTlv(payload: string, options: ParseTlvOptions = {}): E
     accounts.push(account);
   }
   const amountStr = tags['54'];
+  let amount: number | undefined;
+  if (amountStr !== undefined) {
+    // Only trust a well-formed positive amount; a garbage/NaN/zero tag-54
+    // (crafted QR) must not flow into amount checks or API URLs downstream.
+    const parsed = parseFloat(amountStr);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      amount = parsed;
+    }
+  }
   const crc = tags['63'];
   const crcValid = crc !== undefined && verifyCrc(payload, '63');
   if (options.strict && crc !== undefined && !crcValid) {
     throw new CrcValidationError('emvco: CRC (tag 63) does not match payload');
   }
   return {
-    amount: amountStr !== undefined ? parseFloat(amountStr) : undefined,
+    amount,
     currency: tags['53'],
     country: tags['58'],
     pointOfInitiation: tags['01'],

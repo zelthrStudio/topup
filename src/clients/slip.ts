@@ -88,7 +88,7 @@ async function resolveAmount(image: Buffer): Promise<number> {
     const qr = await decodeQr(image);
     if (qr) {
       bankCode = qr.slipCheck?.bankCode ?? qr.emvco?.accounts[0]?.bankCode;
-      if (qr.emvco?.amount != null) return qr.emvco.amount;
+      if (qr.emvco?.amount != null && Number.isFinite(qr.emvco.amount)) return qr.emvco.amount;
     }
   } catch {
     // QR failed — fall through to OCR.
