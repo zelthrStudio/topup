@@ -2,7 +2,7 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
-## [Unreleased] — audit round 3 (report-1: leaks, caps, HEIC, drift)
+## [v1.0.7] - 2026-08-15 — audit round 3 (report-1: leaks, caps, HEIC, drift)
 
 ### Security
 - **Leak:** `post()` error messages redact the request URL to origin + first
@@ -36,7 +36,7 @@ All notable changes to `@zelthr/topup` will be documented in this file.
 - `TESSERACT_LANG_PATH` env override for bundled consumers whose `__dirname`
   no longer points at the package (report-1 B16).
 
-## [Unreleased] — audit round 2 (CRC, redirects, budgets)
+## [v1.0.6] - 2026-08-15 — audit round 2 (CRC, redirects, budgets)
 
 ### Fixed
 - **Correctness:** `crc16ccitt()` now checksums the payload's **UTF-8 bytes**
@@ -70,7 +70,7 @@ All notable changes to `@zelthr/topup` will be documented in this file.
   longer overflow the stack.
 - `TESSERACT_MAX_WORKERS` is clamped to 1–8 (each worker holds ~200 MB).
 
-## [Unreleased] — whole-baht OCR amounts
+## [v1.0.5] - 2026-08-15 — whole-baht OCR amounts
 
 ### Fixed
 - **Correctness:** Thai slips that print whole baht without decimals (e.g.
@@ -88,7 +88,7 @@ All notable changes to `@zelthr/topup` will be documented in this file.
 - Amount-band (fast path) detections carry double agreement weight so the
   region purpose-built for the amount wins ties against full-image noise.
 
-## [Unreleased] — review-driven correctness & hardening
+## [v1.0.4] - 2026-08-15 — review-driven correctness & hardening
 
 ### Fixed
 - **Security:** `truemoney()` with an explicit `amount` now throws a new
@@ -121,7 +121,7 @@ All notable changes to `@zelthr/topup` will be documented in this file.
 - Defensive guard: the alt-profile OCR loop no longer indexes `altProfiles[0]`
   when the profile map would produce an empty list.
 
-## [Unreleased] — hardening & OCR performance
+## [v1.0.3] - 2026-08-15 — hardening & OCR performance
 
 ### Fixed
 - **Security:** EMVCo tag-54 amounts are trusted only when they parse to a
@@ -136,7 +136,7 @@ All notable changes to `@zelthr/topup` will be documented in this file.
   full JPEG decodes per call). Measured ~437 ms per call warm (was dominated
   by repeated decodes).
 
-## [Unreleased] — security hardening
+## [v1.0.2] - 2026-08-15 — security hardening
 
 ### Fixed
 - **Security:** `bank()` now rejects a non-finite/negative `amount` with
@@ -162,7 +162,7 @@ All notable changes to `@zelthr/topup` will be documented in this file.
 - `getSlipAmount()` exposes `counts` (how many strategies reported each
   amount) on the result — additive, non-breaking.
 
-## [Unreleased] — v1.0.0 (release preparation)
+## [v1.0.0] - 2026-08-15 — release preparation
 
 ### Added
 - Error hierarchy (`TopupError` base; `ValidationError`, `QrParseError`,
