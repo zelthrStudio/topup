@@ -1,5 +1,5 @@
 import { parseEmvcoTlv, type EmvcoQr } from './emvco';
-import { parseSlipCheck, SLIP_CHECK_RE, type SlipCheckQr } from './slipcheck';
+import { parseSlipCheck, isSlipCheckPayload, type SlipCheckQr } from './slipcheck';
 import type { ParseTlvOptions } from './tlv';
 
 /** A bank/payer account entry normalized across QR formats. */
@@ -59,7 +59,7 @@ export function parseEmvco(payload: string, options: ParseTlvOptions = {}): Deco
       emvco: e,
     };
   }
-  if (SLIP_CHECK_RE.test(payload)) {
+  if (isSlipCheckPayload(payload)) {
     const s = parseSlipCheck(payload, options);
     return {
       payload,

@@ -60,6 +60,11 @@ const server = http.createServer((req, res) => {
     if (req.url === '/hang') {
       return; // never respond — for timeout tests the client aborts
     }
+    if (req.url === '/big-error') {
+      res.statusCode = 500;
+      res.end('X'.repeat(70000)); // oversized error body (>64KB cap)
+      return;
+    }
     if (req.url === '/raw200') {
       res.end('plain text response');
       return;
@@ -228,6 +233,10 @@ test('extractAmounts reads whole-baht amounts and rejects noise', () => {
   // References and misread words starting/containing digits must not match.
   assert.deepEqual(extractAmounts('50BPP03857'), []);
   assert.deepEqual(extractAmounts('0.00 U1n'), []);
+  // Dates (slash and dot forms) must never read as amounts.
+  assert.deepEqual(extractAmounts('25/12/2567'), []);
+  assert.deepEqual(extractAmounts('25.12.67'), []);
+  assert.deepEqual(extractAmounts('25/12/2567 ยอด 80.50'), [80.5]);
 });
 
 test('Paotang slip (whole-baht 5) extracts 5, not the date/time noise', async (t) => {
@@ -353,11 +362,17 @@ test('getSlipAmount honors an overall pipeline deadline', async (t) => {
   assert.match(res.error, /exceeded 1 ms/);
 });
 
-test('clients never follow redirects (bodies are not re-POSTed)', async () => {
-  await assert.rejects(
-    () => api().truemoney('REDIRECT', '0812345678'),
-    (err) => err instanceof api().HttpError && /request failed/.test(err.message)
-  );
+test('clients never follow redirects and redact code/phone from error messages', async () => {
+  const err = await api()
+    .truemoney('REDIRECT', '0812345678')
+    .catch((e) => e);
+  assert.ok(err instanceof api().HttpError);
+  assert.match(err.message, /request failed/);
+  // M-4: the URL carries the redeemable gift code and phone number in its
+  // path — error messages must never expose either.
+  assert.doesNotMatch(err.message, /REDIRECT/);
+  assert.doesNotMatch(err.message, /0812345678/);
+  assert.match(err.message, /\/truemoney\/…/);
 });
 
 // --- Input validation ---
@@ -452,6 +467,36 @@ test('bank manual treats a long QR payload (not % 4) as raw QR data, not base64'
   assert.equal(res.body.qrcode_data, raw);
 });
 
+test('bank manual treats a %4-aligned EMVCo payload as QR data, not an image', async () => {
+  // 608 chars, length % 4 === 0: would previously trip the base64-image
+  // heuristic and fail with "not a valid image". The 000201 prefix must win.
+  const raw = '000201' + 'A'.repeat(602);
+  assert.equal(raw.length % 4, 0);
+  const res = await api().bank(raw, 'manual', 500);
+  assert.equal(res.url, '/api/slip/500/no_slip');
+  assert.equal(res.body.qrcode_data, raw);
+});
+
+test('decodeQr raises a clear error for HEIC instead of a silent "no QR"', async () => {
+  // Minimal ISO BMFF container with the heic brand (like an iPhone photo).
+  const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic', 'latin1')]);
+  await assert.rejects(() => api().decodeQr(heic), /HEIC/);
+});
+
+test('getSlipAmount reports HEIC/AVIF explicitly', async () => {
+  const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic', 'latin1')]);
+  const res = await api().getSlipAmount(heic);
+  assert.equal(res.success, false);
+  assert.match(res.error, /HEIC/);
+});
+
+test('bank rejects HEIC uploads with a clear message', async () => {
+  const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic', 'latin1')]);
+  const dataUri = `data:image/heic;base64,${heic.toString('base64')}`;
+  await assert.rejects(() => api().bank(dataUri, 'MANUAL', 100), /HEIC/);
+  await assert.rejects(() => api().bank(dataUri, 'LOCALOCR'), /HEIC/);
+});
+
 test('bank OCR rejects a malformed data URI (no comma)', async () => {
   await assert.rejects(() => api().bank('data:image/jpeg;base64', 'OCR'), /malformed data URI/);
 });
@@ -501,6 +546,18 @@ test('HTTP 500 with a non-JSON body keeps status and raw body', async () => {
   assert.equal(err.status, 500);
   assert.match(err.message, /HTTP 500/);
   assert.equal(err.body, 'Internal Server Error');
+});
+
+test('oversized error bodies are capped to a 64KB preview', async () => {
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const err = await api()
+    .post(`${base}/big-error`, {})
+    .catch((e) => e);
+  assert.ok(err instanceof api().HttpError);
+  assert.equal(err.status, 500);
+  assert.equal(err.message, 'HTTP 500');
+  assert.equal(err.body, undefined, 'full body must not be retained');
+  assert.equal(err.bodyPreview.length, 65536, 'preview is capped at 64KB');
 });
 
 test('non-JSON 2xx responses are returned as raw text', async () => {
@@ -558,6 +615,28 @@ test('strict parseSlipCheck rejects malformed payloads', () => {
   assert.doesNotThrow(() => parseSlipCheck(good, { strict: true }));
   const tampered = good.replace('BPP03857', 'BPP03858');
   assert.throws(() => parseSlipCheck(tampered, { strict: true }), CrcValidationError);
+});
+
+test('non-digit TLV length fields stop parsing instead of misparsing', () => {
+  const { parseSlipCheck, parseEmvco, QrParseError } = api();
+  // "1x" as a length: parseInt("1x") would silently read 1.
+  assert.deepEqual(parseSlipCheck('011x123456789').raw, {});
+  assert.throws(() => parseSlipCheck('011x123456789', { strict: true }), QrParseError);
+  assert.deepEqual(parseEmvco('000201011x123456789').payload, '000201011x123456789');
+  assert.throws(() => parseEmvco('000201011x123456789', { strict: true }), QrParseError);
+});
+
+test('a v2-format slip-check QR (new version, 4-digit bank code) still parses', () => {
+  const { parseEmvco, crc16ccitt } = api();
+  const inner = '00' + '06' + '000002' + '01' + '04' + '0004' + '02' + '11' + '12345678901';
+  const body = '00' + '33' + inner + '51' + '02' + 'TH';
+  const payload = body + '91' + '04' + crc16ccitt(body + '9104');
+  const qr = api().parseEmvco(payload);
+  assert.ok(qr.slipCheck, 'v2 payload must be recognized as slip-check (not raw)');
+  assert.equal(qr.slipCheck.version, '000002');
+  assert.equal(qr.slipCheck.bankCode, '0004');
+  assert.equal(qr.slipCheck.reference, '12345678901');
+  assert.equal(qr.slipCheck.crcValid, true);
 });
 
 // --- Image limits ---

@@ -23,6 +23,20 @@ export interface SlipCheckQr {
 export const SLIP_CHECK_RE = /^00\d{2}00060000010103/;
 
 /**
+ * Dynamic header check: reads the tag-00 length field and verifies the inner
+ * TLV starts with a version tag/value, without baking in the current format
+ * version ("000001") or a 3-digit bank code. Unlike SLIP_CHECK_RE, this keeps
+ * recognizing slip-check payloads after BOT bumps the version field.
+ */
+export function isSlipCheckPayload(payload: string): boolean {
+  if (!/^00\d{2}/.test(payload)) return false;
+  const len = parseInt(payload.slice(2, 4), 10);
+  if (Number.isNaN(len) || len < 4 || 4 + len > payload.length) return false;
+  const inner = payload.slice(4, 4 + len);
+  return /^00\d{2}\d{4,}/.test(inner);
+}
+
+/**
  * Parse a Thai bank slip-check QR payload (Bank of Thailand standard).
  * Tag 00 wraps a nested TLV with version/bank code/slip reference; tag 51 is
  * the country, tag 91 the CRC. Lengths are decimal.
@@ -33,11 +47,12 @@ export function parseSlipCheck(payload: string, options: ParseTlvOptions = {}): 
   let pos = 0;
   while (pos + 4 <= payload.length) {
     const tag = payload.slice(pos, pos + 2);
-    const len = parseInt(payload.slice(pos + 2, pos + 4), 10);
-    if (!/^[0-9]{2}$/.test(tag) || Number.isNaN(len)) {
+    const lenStr = payload.slice(pos + 2, pos + 4);
+    if (!/^[0-9]{2}$/.test(tag) || !/^[0-9]{2}$/.test(lenStr)) {
       if (strict) throw new QrParseError(`slip-check: invalid tag/length at offset ${pos}`);
       break;
     }
+    const len = parseInt(lenStr, 10);
     pos += 4;
     if (pos + len > payload.length) {
       if (strict) throw new QrParseError(`slip-check: value of tag ${tag} overruns payload`);

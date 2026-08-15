@@ -2,7 +2,8 @@ import { post } from './http';
 import { decodeQr } from '../qr';
 import { getSlipAmount, isLikelyAmount } from '../ocr/amount';
 import { ValidationError, OcrError } from '../errors';
-import { sniffImageFormat } from '../util/image-format';
+import { sniffImageFormat, sniffUnsupportedPhoneFormat, UNSUPPORTED_PHONE_FORMAT_MESSAGE } from '../util/image-format';
+import { isSlipCheckPayload } from '../qr/slipcheck';
 import type { TopupApiResponse } from '../types';
 import sharp from 'sharp';
 
@@ -20,8 +21,16 @@ const CONSENT = { tos: true, privacy: true, eula: true } as const;
 const DATA_URI_RE = /^data:/i;
 // Bare base64 must be padded (length % 4 === 0); this keeps long raw QR
 // payloads (EMVCo/slip-check data, almost never a multiple of four) from
-// being misclassified as image data in MANUAL mode.
+// being misclassified as image data in MANUAL mode. QR payloads are also
+// identified by their distinctive prefixes before the base64 heuristic runs:
+// real image base64 never starts with "000201" (JPEG/PNG/WebP magic bytes
+// rule it out), and slip-check headers start with a tag-00 TLV.
 const BASE64_IMAGE_RE = /^[A-Za-z0-9+/=]{600,}$/;
+const EMVCO_PREFIX_RE = /^000201/;
+
+function looksLikeQrPayload(data: string): boolean {
+  return EMVCO_PREFIX_RE.test(data) || isSlipCheckPayload(data);
+}
 
 // Guard rails against memory exhaustion from oversized uploads. MAX_BASE64_LENGTH
 // is a cheap pre-check on the raw string before we allocate a decoded buffer;
@@ -68,7 +77,12 @@ function dataUriToBuffer(data: string): Buffer {
  */
 async function assertImageBuffer(buf: Buffer): Promise<void> {
   if (!sniffImageFormat(buf)) {
-    throw new ValidationError('bank: data is not a valid image (expected JPEG, PNG or WebP)');
+    const unsupported = sniffUnsupportedPhoneFormat(buf);
+    throw new ValidationError(
+      unsupported
+        ? `bank: ${UNSUPPORTED_PHONE_FORMAT_MESSAGE(unsupported.toUpperCase())}`
+        : 'bank: data is not a valid image (expected JPEG, PNG or WebP)'
+    );
   }
   let meta: { width?: number; height?: number };
   try {
@@ -164,7 +178,7 @@ export async function bank(
   ) {
     throw new ValidationError('bank: amount must be a finite number between 0 and 1,000,000,000 with at most 2 decimal places');
   }
-  const image = isImageData(data) ? normalizeImage(data) : null;
+  const image = !looksLikeQrPayload(data) && isImageData(data) ? normalizeImage(data) : null;
   const qr = image ? null : data;
 
   if (m === 'OCR') {

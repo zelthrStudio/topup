@@ -29,11 +29,19 @@ function debugLog(...args: unknown[]): void {
 export class TesseractTimeoutError extends Error {}
 
 // Prefer a local eng.traineddata next to the package root (offline, no CDN);
-// fall back to the tesseract.js CDN when the file is missing.
-const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..');
-const LOCAL_LANG_DIR = [path.join(PACKAGE_ROOT, 'assets'), PACKAGE_ROOT].find((dir) =>
-  fs.existsSync(path.join(dir, 'eng.traineddata'))
-);
+// fall back to the tesseract.js CDN when the file is missing. TESSERACT_LANG_PATH
+// lets bundled consumers (serverless/Electron, where __dirname doesn't point
+// at the package) point at their own traineddata directory.
+const LOCAL_LANG_DIR = (() => {
+  const override = process.env.TESSERACT_LANG_PATH;
+  if (override) {
+    return fs.existsSync(path.join(override, 'eng.traineddata')) ? override : undefined;
+  }
+  const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..');
+  return [path.join(PACKAGE_ROOT, 'assets'), PACKAGE_ROOT].find((dir) =>
+    fs.existsSync(path.join(dir, 'eng.traineddata'))
+  );
+})();
 
 interface TesseractWorker {
   recognize(input: Buffer): Promise<{ data: { text: string } }>;

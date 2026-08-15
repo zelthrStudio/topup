@@ -7,13 +7,20 @@
  *   3. Standalone whole-baht amounts: "5", "80", "999" — real Thai slips
  *      print whole baht without ".00" (e.g. "5 บาท").
  * The whole-baht branches never touch tokens adjacent to word characters,
- * colons or dots, so times ("14:43"), references ("50BPP03857",
- * "25512636416"), account suffixes ("0471"), misread unit words ("U1n")
- * and partial digit runs can't be misread as amounts. Thai script is
- * non-ASCII, so "999" next to "บาท" still matches.
+ * colons or dots, so times ("14:43"), dates ("25/12/2567"), references
+ * ("50BPP03857", "25512636416"), account suffixes ("0471"), misread unit
+ * words ("U1n") and partial digit runs can't be misread as amounts. The
+ * decimal branch rejects a following ".nn", so dot-separated dates
+ * ("25.12.67") don't read "25.12" as an amount. Thai script is non-ASCII, so
+ * "999" next to "บาท" still matches.
  */
 const AMOUNT_REGEX =
-  /\b(?!0\.00\b)(\d{1,3}(?:,\d{3})*|\d{4,}|0)\.\d{2}\b|(?<![\w:])\d{1,3}(?:,\d{3}){1,2}(?![\w:.])(?!,\d)|(?<![\w:])[1-9]\d{0,2}(?![\w:.])/g;
+  /\b(?!0\.00\b)(?<!\.)(\d{1,3}(?:,\d{3})*|\d{4,}|0)\.\d{2}\b(?!\.\d)|(?<![\w:./-])\d{1,3}(?:,\d{3}){1,2}(?![\w:./-])(?!,\d)|(?<![\w:./-])[1-9]\d{0,2}(?![\w:./-])/g;
+
+/** extractAmounts is public API, but its input is OCR line text (a few dozen
+ *  chars). Cap it so an adversarial multi-MB string can't drive the
+ *  (?,...)\d{3}* alternation into O(N²) backtracking. */
+const MAX_OCR_TEXT_CHARS = 8192;
 
 /** Characters OCR engines commonly confuse with digits. */
 const OCR_CONFUSIONS: Array<[RegExp, string]> = [
@@ -28,7 +35,7 @@ const OCR_CONFUSIONS: Array<[RegExp, string]> = [
 const CURRENCY_RE = /[฿]/g;
 
 export function extractAmounts(text: string): number[] {
-  let normalized = text;
+  let normalized = text.length > MAX_OCR_TEXT_CHARS ? text.slice(0, MAX_OCR_TEXT_CHARS) : text;
   for (const [re, replacement] of OCR_CONFUSIONS) {
     normalized = normalized.replace(re, replacement);
   }

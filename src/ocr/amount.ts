@@ -3,7 +3,7 @@ import { CROP_PROFILES, DEFAULT_CROP, PROFILES, type BankProfile } from './profi
 import { extractAmounts, isLikelyAmount } from './extract';
 import { getOcrInstance, resetOcrInstance, runOCRLines } from './engines/guten';
 import { runTesseractOCR, terminateTesseractPool, warmupTesseract } from './engines/tesseract';
-import { sniffImageFormat } from '../util/image-format';
+import { sniffImageFormat, sniffUnsupportedPhoneFormat, UNSUPPORTED_PHONE_FORMAT_MESSAGE } from '../util/image-format';
 
 /** Which strategy produced the extracted amounts. */
 export type AmountSource = 'fast' | 'guten' | 'tesseract';
@@ -45,7 +45,24 @@ interface RawImage extends ImageMeta {
   channels: 1 | 2 | 3 | 4;
 }
 
+/** Dimension/pixel caps mirroring decodeQr / bank(): an image at or beyond
+ *  these decodes to hundreds of MB of RGBA for no benefit. */
+const MAX_IMAGE_DIMENSION = 16_384;
+const MAX_IMAGE_PIXELS = 40_000_000;
+
 async function decodeRaw(imageBuffer: Buffer): Promise<RawImage> {
+  const meta = await sharp(imageBuffer).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  if (width === 0 || height === 0) {
+    throw new Error('amount: image has no dimensions');
+  }
+  if (Math.max(width, height) > MAX_IMAGE_DIMENSION) {
+    throw new Error(`amount: image dimension exceeds ${MAX_IMAGE_DIMENSION}px`);
+  }
+  if (width * height > MAX_IMAGE_PIXELS) {
+    throw new Error(`amount: image exceeds ${MAX_IMAGE_PIXELS} pixels`);
+  }
   const { data, info } = await sharp(imageBuffer)
     .ensureAlpha()
     .raw()
@@ -199,9 +216,13 @@ async function pipeline(
     // Gate the format before any libvips decode: only slip photo formats
     // (JPEG/PNG/WebP) are processed. See util/image-format.
     if (!sniffImageFormat(imageBuffer)) {
+      const unsupported = sniffUnsupportedPhoneFormat(imageBuffer);
+      const error = unsupported
+        ? `amount: ${UNSUPPORTED_PHONE_FORMAT_MESSAGE(unsupported.toUpperCase())}`
+        : 'amount: unsupported image format (expected JPEG, PNG or WebP)';
       return {
         success: false,
-        error: 'amount: unsupported image format (expected JPEG, PNG or WebP)',
+        error,
         amounts: [],
       };
     }

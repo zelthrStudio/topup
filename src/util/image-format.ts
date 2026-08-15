@@ -25,3 +25,23 @@ export function sniffImageFormat(buf: Buffer): SupportedImageFormat | null {
   }
   return null;
 }
+
+const ISO_BMFF_BOX = /^....ftyp/s;
+
+/**
+ * Detect ISO BMFF containers with phone-camera brands (HEIC/AVIF). These are
+ * real slip-photo formats but are not decodable here, so callers must raise a
+ * clear error instead of silently reporting "no QR found" / "unsupported
+ * format".
+ */
+export function sniffUnsupportedPhoneFormat(buf: Buffer): 'heic' | 'avif' | null {
+  if (buf.length < 12 || !ISO_BMFF_BOX.test(buf.toString('latin1', 0, 8))) return null;
+  const major = buf.toString('latin1', 8, 12);
+  const compat = buf.toString('latin1', 12, Math.min(buf.length, 64));
+  if (/^(heic|heix|hevc|hevx|mif1|msf1)$/.test(major) || /(^| )heic( |$)/.test(compat)) return 'heic';
+  if (major === 'avif' || /(^| )avif( |$)/.test(compat)) return 'avif';
+  return null;
+}
+
+export const UNSUPPORTED_PHONE_FORMAT_MESSAGE = (format: string): string =>
+  `${format} images are not supported — convert the slip photo to JPEG, PNG or WebP`;

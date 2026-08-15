@@ -10,10 +10,28 @@ const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
  *  consumers often log. */
 const MAX_ERROR_MESSAGE_CHARS = 2000;
 
+/** Error bodies are attached to thrown errors for diagnostics; retain at most
+ *  64 KB so a hostile/verbose server can't bloat error objects (and skip
+ *  JSON.parse of multi-MB payloads entirely). */
+const MAX_ERROR_BODY_CHARS = 64 * 1024;
+
 function capText(text: string): string {
   return text.length > MAX_ERROR_MESSAGE_CHARS
     ? `${text.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`
     : text;
+}
+
+/** Request URLs carry secrets in the path (truemoney gift codes and phone
+ *  numbers). Error messages are routinely logged / shipped to error trackers,
+ *  so keep only the origin and the first path segment. */
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const first = parsed.pathname.split('/').filter(Boolean)[0];
+    return `${parsed.origin}/${first ? `${first}/…` : ''}`;
+  } catch {
+    return '<invalid url>';
+  }
 }
 
 export interface PostOptions {
@@ -38,7 +56,7 @@ async function readBody(res: Response, maxBytes: number, url: string): Promise<s
         // Release the connection promptly instead of letting the oversized
         // stream drain in the background.
         await reader.cancel().catch(() => {});
-        throw new HttpError(`topup: response body exceeds ${maxBytes} bytes: ${url}`, { status: res.status });
+        throw new HttpError(`topup: response body exceeds ${maxBytes} bytes: ${redactUrl(url)}`, { status: res.status });
       }
       chunks.push(value);
     }
@@ -66,28 +84,44 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
   } catch (err) {
     // AbortSignal.timeout aborts with AbortError whose name is "TimeoutError".
     if ((err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError') {
-      throw new TimeoutError(`topup: request timed out after ${timeoutMs} ms: ${url}`, { cause: err });
+      throw new TimeoutError(`topup: request timed out after ${timeoutMs} ms: ${redactUrl(url)}`, { cause: err });
     }
-    throw new HttpError(`topup: request failed (${(err as Error).name}): ${url}`, { cause: err });
+    throw new HttpError(`topup: request failed (${(err as Error).name}): ${redactUrl(url)}`, { cause: err });
   }
 
   const text = await readBody(res, maxBodyBytes, url);
+  if (!res.ok) {
+    if (text.length > MAX_ERROR_BODY_CHARS) {
+      // Non-2xx with an oversized body: don't retain the full payload, and
+      // don't pay for a JSON.parse of multi-MB error bodies. Keep a preview
+      // for diagnostics.
+      throw new HttpError(`HTTP ${res.status}`, {
+        status: res.status,
+        bodyPreview: text.slice(0, MAX_ERROR_BODY_CHARS),
+      });
+    }
+    let payload: unknown = text;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // Not JSON — keep the raw response body.
+    }
+    if (typeof payload === 'object' && payload !== null) {
+      const record = payload as Record<string, unknown>;
+      throw new HttpError(capText(String(record.slug || record.message || `HTTP ${res.status}`)), {
+        status: res.status,
+        slug: typeof record.slug === 'string' ? capText(record.slug) : undefined,
+        body: payload,
+      });
+    }
+    throw new HttpError(`HTTP ${res.status}: ${capText(String(payload))}`, { status: res.status, body: payload });
+  }
+
   let payload: TopupApiResponse | string = text;
   try {
     payload = JSON.parse(text);
   } catch {
     // Not JSON — keep the raw response body.
-  }
-
-  if (!res.ok) {
-    if (typeof payload === 'object' && payload !== null) {
-      throw new HttpError(capText(String(payload.slug || payload.message || `HTTP ${res.status}`)), {
-        status: res.status,
-        slug: typeof payload.slug === 'string' ? capText(payload.slug) : undefined,
-        body: payload,
-      });
-    }
-    throw new HttpError(`HTTP ${res.status}: ${capText(String(payload))}`, { status: res.status, body: payload });
   }
   return payload;
 }

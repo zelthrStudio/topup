@@ -2,6 +2,38 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — audit round 3 (report-1: leaks, caps, HEIC, drift)
+
+### Security
+- **Leak:** `post()` error messages redact the request URL to origin + first
+  path segment — the TrueMoney gift code and phone number (path segments)
+  no longer reach consumer logs / error trackers (report-1 M-4).
+- **Leak:** oversized error response bodies (>64 KB) are no longer attached to
+  `HttpError` nor JSON-parsed; a capped `bodyPreview` string is kept instead
+  (report-1 L-9).
+- **Supply chain:** `sharp` bumped to ^0.35.3 (root and via `overrides`) —
+  clears the libvips decode CVEs (CVE-2026-33327/33328/35590/35591) from
+  `npm audit`; the magic-byte sniff gate stays regardless.
+- **DX/security:** HEIC/AVIF inputs (iPhone/Android camera defaults) now
+  raise a clear error in `decodeQr` / `getSlipAmount` / `bank()` instead of a
+  silent "no QR found" / "unsupported format" (report-1 B18).
+
+### Correctness
+- **Dates:** slash dates ("25/12/2567") and dot dates ("25.12.67") can no
+  longer be misread as amounts; `extractAmounts()` input is capped at 8192
+  chars against regex backtracking (report-1 B2, L-5).
+- **TLV:** length fields must be two decimal digits — "1x" no longer
+  silently parses as 1 (report-1 A3).
+- **Slip-check drift:** header recognition reads the tag-00 length and inner
+  version dynamically (`isSlipCheckPayload`); a future format version or a
+  4-digit bank code keeps parsing (report-1 B5).
+- **MANUAL mode:** long EMVCo payloads (000201 prefix) are treated as QR
+  data even when their length is a multiple of 4 (report-1 L-7/B24).
+- `getSlipAmount`/`decodeRaw` enforce the same dimension/pixel caps as the
+  QR decoder (report-1 L-3/B10).
+- `TESSERACT_LANG_PATH` env override for bundled consumers whose `__dirname`
+  no longer points at the package (report-1 B16).
+
 ## [Unreleased] — audit round 2 (CRC, redirects, budgets)
 
 ### Fixed

@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { dynamicImport } from '../util/dynamic-import';
-import { sniffImageFormat } from '../util/image-format';
+import { sniffImageFormat, sniffUnsupportedPhoneFormat, UNSUPPORTED_PHONE_FORMAT_MESSAGE } from '../util/image-format';
 import { ValidationError } from '../errors';
 import { parseEmvco, type DecodedQr } from './parse';
 
@@ -64,7 +64,16 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
   if (typeof image === 'string') {
     throw new ValidationError('decodeQr: pass image bytes as a Buffer, not a file path');
   }
-  if (!Buffer.isBuffer(image) || !sniffImageFormat(image)) {
+  if (!Buffer.isBuffer(image)) {
+    return null;
+  }
+  // iPhone/Android camera defaults (HEIC/AVIF) are real slip photos that this
+  // package cannot decode — raise a clear error instead of "no QR found".
+  const unsupported = sniffUnsupportedPhoneFormat(image);
+  if (unsupported) {
+    throw new ValidationError(`decodeQr: ${UNSUPPORTED_PHONE_FORMAT_MESSAGE(unsupported.toUpperCase())}`);
+  }
+  if (!sniffImageFormat(image)) {
     return null;
   }
   let width: number;

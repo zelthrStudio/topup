@@ -48,11 +48,14 @@ function parseTlvDepth(payload: string, options: ParseTlvOptions, depth: number)
   let pos = 0;
   while (pos + 4 <= payload.length) {
     const tag = payload.slice(pos, pos + 2);
-    const len = parseInt(payload.slice(pos + 2, pos + 4), 10);
-    if (!/^[0-9]{2}$/.test(tag) || Number.isNaN(len)) {
+    const lenStr = payload.slice(pos + 2, pos + 4);
+    // Both fields must be exactly two decimal digits: parseInt would happily
+    // accept "1x" as 1 and silently misparse the payload.
+    if (!/^[0-9]{2}$/.test(tag) || !/^[0-9]{2}$/.test(lenStr)) {
       if (strict) throw new QrParseError(`tlv: invalid tag/length at offset ${pos}`);
       break;
     }
+    const len = parseInt(lenStr, 10);
     pos += 4;
     if (pos + len > payload.length) {
       if (strict) throw new QrParseError(`tlv: value of tag ${tag} overruns payload (offset ${pos}, length ${len})`);
