@@ -1,7 +1,7 @@
 ﻿'use strict';
 // Consumer smoke test — CommonJS consumer using the installed tarball.
 // Expects: the tarball installed as @zelthr/topup in the CWD's node_modules,
-// and test1.jpg copied next to this file (or set TOPUP_SMOKE_IMAGE).
+// and กสิกรไทย.jpg copied next to this file (or set TOPUP_SMOKE_IMAGE).
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -33,7 +33,7 @@ async function main() {
   assert.equal(topup.verifyCrc('0041000600000101030040220016218195650BPP038575102TH9104554A', '91'), true);
 
   // 4. Real slip QR decode + amount OCR (exercises sharp + onnxruntime + tesseract).
-  const imgPath = process.env.TOPUP_SMOKE_IMAGE || path.join(__dirname, 'test1.jpg');
+  const imgPath = process.env.TOPUP_SMOKE_IMAGE || path.join(__dirname, 'กสิกรไทย.jpg');
   if (fs.existsSync(imgPath)) {
     const buf = fs.readFileSync(imgPath);
     const qr = await topup.decodeQr(buf);

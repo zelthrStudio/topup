@@ -45,7 +45,7 @@ jobs:
           set -euxo pipefail
           TARBALL=$(ls zelthr*.tgz | head -n1)
           TMP=$(mktemp -d)
-          cp "$TARBALL" scripts/consumer-smoke/smoke.cjs scripts/consumer-smoke/smoke.mjs test/test1.jpg "$TMP/"
+          cp "$TARBALL" scripts/consumer-smoke/smoke.cjs scripts/consumer-smoke/smoke.mjs test/กสิกรไทย.jpg "$TMP/"
           cd "$TMP"
           npm init -y >/dev/null
           # Allow native install scripts so onnxruntime/sharp are fully set up.
