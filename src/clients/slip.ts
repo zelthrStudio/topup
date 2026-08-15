@@ -18,6 +18,9 @@ export type BankMode = 'OCR' | 'LOCALOCR' | 'MANUAL';
 const CONSENT = { tos: true, privacy: true, eula: true } as const;
 
 const DATA_URI_RE = /^data:/i;
+// Bare base64 must be padded (length % 4 === 0); this keeps long raw QR
+// payloads (EMVCo/slip-check data, almost never a multiple of four) from
+// being misclassified as image data in MANUAL mode.
 const BASE64_IMAGE_RE = /^[A-Za-z0-9+/=]{600,}$/;
 
 // Guard rails against memory exhaustion from oversized uploads. MAX_BASE64_LENGTH
@@ -31,7 +34,7 @@ const MAX_PIXELS = 40_000_000;
 const MAX_DIMENSION = 16_384;
 
 function isImageData(data: string): boolean {
-  return DATA_URI_RE.test(data) || BASE64_IMAGE_RE.test(data);
+  return DATA_URI_RE.test(data) || (BASE64_IMAGE_RE.test(data) && data.length % 4 === 0);
 }
 
 function normalizeImage(data: string): string {
@@ -39,7 +42,14 @@ function normalizeImage(data: string): string {
 }
 
 function dataUriToBuffer(data: string): Buffer {
-  const b64 = DATA_URI_RE.test(data) ? data.slice(data.indexOf(',') + 1) : data;
+  let b64 = data;
+  if (DATA_URI_RE.test(data)) {
+    const comma = data.indexOf(',');
+    if (comma === -1) {
+      throw new ValidationError('bank: malformed data URI (missing comma)');
+    }
+    b64 = data.slice(comma + 1);
+  }
   if (b64.length > MAX_BASE64_LENGTH) {
     throw new ValidationError(`bank: image data exceeds ${MAX_BASE64_LENGTH} bytes of base64`);
   }
@@ -98,8 +108,9 @@ async function resolveAmount(image: Buffer): Promise<number> {
     throw new OcrError('bank: amount not found in image');
   }
   // Prefer the amount that several strategies agree on (per-strategy counts in
-  // res.counts); tie-break toward the largest. Fall back to the largest
-  // likely amount when nothing agrees, so a single OCR misread of an inflated
+  // res.counts); tie-break toward the SMALLER amount so an OCR misread that
+  // inflates a digit can never win a tie. Fall back to the largest likely
+  // amount when nothing agrees, so a single OCR misread of an inflated
   // figure cannot drive the API lookup on its own.
   const candidates = res.amounts.filter(isLikelyAmount);
   const pool = candidates.length > 0 ? candidates : res.amounts;
@@ -108,7 +119,7 @@ async function resolveAmount(image: Buffer): Promise<number> {
   let bestCount = -1;
   for (const amount of pool) {
     const count = counts[amount] ?? 1;
-    if (count > bestCount || (count === bestCount && amount > best)) {
+    if (count > bestCount || (count === bestCount && amount < best)) {
       best = amount;
       bestCount = count;
     }
@@ -133,8 +144,19 @@ export async function bank(
   if (!['OCR', 'LOCALOCR', 'MANUAL'].includes(m)) {
     throw new ValidationError(`bank: unknown mode "${mode}" (use OCR, manual or localOCR)`);
   }
-  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) {
-    throw new ValidationError('bank: amount must be a non-negative finite number');
+  // Max plausible THB slip amount (1e9 stays well inside the range where
+  // JS stringifies numbers without exponential notation) and satang precision
+  // (2 decimal places) — anything else would produce a mangled /api/slip/:amt
+  // URL or a garbage comparison value.
+  if (
+    amount !== undefined &&
+    (typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      amount > 1_000_000_000 ||
+      Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-6)
+  ) {
+    throw new ValidationError('bank: amount must be a finite number between 0 and 1,000,000,000 with at most 2 decimal places');
   }
   const image = isImageData(data) ? normalizeImage(data) : null;
   const qr = image ? null : data;
@@ -147,8 +169,9 @@ export async function bank(
 
   if (m === 'LOCALOCR') {
     if (!image) throw new ValidationError('bank: localOCR mode requires image data');
-    await assertImageBuffer(dataUriToBuffer(image));
-    const detected = await resolveAmount(dataUriToBuffer(image));
+    const buf = dataUriToBuffer(image);
+    await assertImageBuffer(buf);
+    const detected = await resolveAmount(buf);
     return post(`${SLIP_BASE}/api/slip/${detected}`, { img: image, ...CONSENT });
   }
 

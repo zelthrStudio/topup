@@ -300,7 +300,7 @@ export async function getSlipAmount(
           })
         );
         results.forEach(({ amounts, confidence }) => record(amounts, 'guten', confidence));
-      } else {
+      } else if (altProfiles.length > 0) {
         let i = 0;
         let pending: Promise<Buffer> | null = processOnce(altProfiles[0][0], altProfiles[0][1], cropped);
         while (i < altProfiles.length && !settled()) {

@@ -62,7 +62,10 @@ async function spawnTesseractWorker(): Promise<TesseractWorker> {
 
 const tesseractWorkers = new Set<TesseractWorker>();
 const tesseractIdle: TesseractWorker[] = [];
-const tesseractWaiters: Array<(worker: TesseractWorker) => void> = [];
+const tesseractWaiters: Array<{
+  resolve: (worker: TesseractWorker) => void;
+  reject: (err: Error) => void;
+}> = [];
 const tesseractWorkerFailures = new WeakMap<TesseractWorker, number>();
 let tesseractSpawning = 0;
 let tesseractBootstrapPromise: Promise<void> | null = null;
@@ -96,12 +99,12 @@ async function acquireTesseractWorker(): Promise<TesseractWorker> {
       tesseractSpawning -= 1;
     }
   }
-  return new Promise((resolve) => tesseractWaiters.push(resolve));
+  return new Promise<TesseractWorker>((resolve, reject) => tesseractWaiters.push({ resolve, reject }));
 }
 
 function releaseTesseractWorker(worker: TesseractWorker): void {
   const waiter = tesseractWaiters.shift();
-  if (waiter) waiter(worker);
+  if (waiter) waiter.resolve(worker);
   else tesseractIdle.push(worker);
 }
 
@@ -176,7 +179,13 @@ export async function terminateTesseractPool(): Promise<void> {
   const workers = Array.from(tesseractWorkers);
   tesseractWorkers.clear();
   tesseractIdle.length = 0;
+  // Callers queued for a worker must not hang forever: reject them so their
+  // awaits settle instead of being silently discarded.
+  const waiters = tesseractWaiters.splice(0);
   tesseractWaiters.length = 0;
+  for (const waiter of waiters) {
+    waiter.reject(new Error('tesseract: worker pool shut down'));
+  }
   tesseractSpawning = 0;
   tesseractBootstrapPromise = null;
   tesseractModulePromise = null;

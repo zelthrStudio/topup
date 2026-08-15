@@ -25,6 +25,9 @@ async function readBody(res: Response, maxBytes: number, url: string): Promise<s
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
+        // Release the connection promptly instead of letting the oversized
+        // stream drain in the background.
+        await reader.cancel().catch(() => {});
         throw new HttpError(`topup: response body exceeds ${maxBytes} bytes: ${url}`, { status: res.status });
       }
       chunks.push(value);

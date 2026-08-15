@@ -76,5 +76,13 @@ export class AmountMismatchError extends HttpError {
   }
 }
 
+/** Amount verification was requested but no amount could be extracted. */
+export class AmountVerificationError extends HttpError {
+  constructor(message: string, options?: { cause?: unknown; body?: unknown }) {
+    super(message, { cause: options?.cause, slug: 'amount-unverifiable', body: options?.body });
+    this.name = 'AmountVerificationError';
+  }
+}
+
 /** Back-compat alias: TopupApiError is what HttpError instances satisfy. */
 export type TopupApiError = HttpError;

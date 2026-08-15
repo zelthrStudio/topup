@@ -21,6 +21,7 @@ export {
   TimeoutError,
   HttpError,
   AmountMismatchError,
+  AmountVerificationError,
 } from './errors';
 
 // Local slip amount extraction (QR + Guten OCR/ONNX + tesseract)

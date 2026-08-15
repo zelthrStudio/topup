@@ -26,6 +26,15 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ status: { code: 'SUCCESS' }, data: { redeem: { amount_baht: '100', amount: 100 } } }));
       return;
     }
+    if (req.url.includes('redeem-no-amount')) {
+      res.end(JSON.stringify({ status: { code: 'SUCCESS' }, data: {} }));
+      return;
+    }
+    if (req.url.includes('redeem-fee-first')) {
+      // Nested fee breakdown iterated BEFORE the real top-level amount.
+      res.end(JSON.stringify({ fee: { amount: 50 }, amount: 100 }));
+      return;
+    }
     const statusMatch = req.url.match(/^\/status\/(\d+)/);
     if (statusMatch) {
       const status = Number(statusMatch[1]);
@@ -284,6 +293,25 @@ test('truemoney amount check throws on mismatch', async () => {
   );
 });
 
+test('truemoney amount verification throws when no amount can be extracted', async () => {
+  await assert.rejects(
+    () => api().truemoney('redeem-no-amount', '0812345678', { amount: 100 }),
+    (err) => err.slug === 'amount-unverifiable' && err instanceof api().AmountVerificationError
+  );
+  // Without an explicit amount, the same response still resolves normally.
+  const res = await api().truemoney('redeem-no-amount', '0812345678');
+  assert.equal(res.status.code, 'SUCCESS');
+});
+
+test('truemoney prefers the top-level amount over a nested fee breakdown', async () => {
+  const res = await api().truemoney('redeem-fee-first', '0812345678', { amount: 100 });
+  assert.equal(res.amount, 100);
+  await assert.rejects(
+    () => api().truemoney('redeem-fee-first', '0812345678', { amount: 50 }),
+    (err) => err.slug === 'amount-mismatch'
+  );
+});
+
 test('truemoney rejects an invalid expected amount', async () => {
   await assert.rejects(() => api().truemoney('ABCD1234', '0812345678', { amount: -5 }), /non-negative number/);
   await assert.rejects(() => api().truemoney('ABCD1234', '0812345678', { amount: NaN }), /non-negative number/);
@@ -311,10 +339,31 @@ test('bank manual accepts real images and rejects garbage', async (t) => {
   await assert.rejects(() => api().bank(fake, 'manual', 80), /not a valid image/);
 });
 
+test('bank manual amount is bounded to THB-plausible values', async () => {
+  await assert.rejects(() => api().bank('004010123456789', 'manual', 1e21), /between 0 and 1,000,000,000/);
+  await assert.rejects(() => api().bank('004010123456789', 'manual', 100.123), /at most 2 decimal places/);
+  await assert.rejects(() => api().bank('004010123456789', 'manual', -5), /between 0 and 1,000,000,000/);
+  const ok = await api().bank('004010123456789', 'manual', 100.5);
+  assert.equal(ok.url, '/api/slip/100.5/no_slip');
+});
+
+test('bank manual treats a long QR payload (not % 4) as raw QR data, not base64', async () => {
+  // 601 alnum characters: long enough for the base64 heuristic but not a
+  // multiple of four, so it must be handled as raw QR data in MANUAL mode.
+  const raw = '0'.repeat(601);
+  const res = await api().bank(raw, 'manual', 100);
+  assert.equal(res.url, '/api/slip/100/no_slip');
+  assert.equal(res.body.qrcode_data, raw);
+});
+
+test('bank OCR rejects a malformed data URI (no comma)', async () => {
+  await assert.rejects(() => api().bank('data:image/jpeg;base64', 'OCR'), /malformed data URI/);
+});
+
 // --- Error hierarchy ---
 
 test('error classes form a catchable hierarchy', () => {
-  const { ValidationError, TopupError, QrParseError, HttpError, AmountMismatchError, TimeoutError } = api();
+  const { ValidationError, TopupError, QrParseError, HttpError, AmountMismatchError, AmountVerificationError, TimeoutError } = api();
   assert.ok(new ValidationError('x') instanceof TopupError);
   assert.ok(new ValidationError('x') instanceof Error);
   assert.ok(new QrParseError('x') instanceof TopupError);
@@ -322,6 +371,8 @@ test('error classes form a catchable hierarchy', () => {
   assert.ok(new HttpError('x') instanceof TopupError);
   assert.ok(new AmountMismatchError('x') instanceof HttpError);
   assert.equal(new AmountMismatchError('x').slug, 'amount-mismatch');
+  assert.ok(new AmountVerificationError('x') instanceof HttpError);
+  assert.equal(new AmountVerificationError('x').slug, 'amount-unverifiable');
 });
 
 test('bank non-2xx throws an HttpError with status/slug/body', async () => {

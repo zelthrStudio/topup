@@ -2,6 +2,39 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — review-driven correctness & hardening
+
+### Fixed
+- **Security:** `truemoney()` with an explicit `amount` now throws a new
+  `AmountVerificationError` (slug `amount-unverifiable`) when the response
+  contains no extractable redeemed amount — verification can no longer pass
+  silently because a field was missing.
+- **Security:** `extractRedeemAmount()` prefers direct top-level amount keys
+  before the deep walk, so a nested fee breakdown iterated first can never
+  shadow the real top-level amount.
+- **Security:** OCR amount ties in `resolveAmount()` break toward the
+  *smaller* amount — a misread that inflates a digit can no longer win ties.
+- **Security:** `bank()` `amount` is bounded to `0..1,000,000,000` with at
+  most 2 decimal places, so a huge/very small value can never be stringified
+  into a mangled exponential-notation `/api/slip/:amt` URL.
+- **Availability:** Guten/ONNX `detect()` calls now race a 30 s deadline and
+  throw `OcrTimeoutError` (same pattern as tesseract) — a pathological input
+  can no longer block `getSlipAmount()`/`bank()` forever.
+- **Availability:** `terminateTesseractPool()` now *rejects* queued worker
+  waiters instead of discarding them, so in-flight callers cannot hang on a
+  promise that never settles during shutdown.
+- `LOCALOCR` mode decodes the base64 payload once and reuses the buffer
+  instead of decoding it twice per call.
+- `readBody()` cancels the stream when the response exceeds `maxBytes`,
+  releasing the connection promptly.
+- `dataUriToBuffer()` rejects a malformed data URI (no comma) with a clear
+  `ValidationError` instead of feeding the prefix into the base64 decoder.
+- Bare-base64 image detection now requires a padded length (`% 4 === 0`), so
+  a long raw EMVCo/slip-check QR payload can no longer be misclassified as
+  image data in `MANUAL` mode.
+- Defensive guard: the alt-profile OCR loop no longer indexes `altProfiles[0]`
+  when the profile map would produce an empty list.
+
 ## [Unreleased] — hardening & OCR performance
 
 ### Fixed
