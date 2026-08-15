@@ -23,7 +23,13 @@ export interface AmountResult {
 interface AmountOptions {
   collectAll?: boolean;
   stopOnLikelyAmount?: boolean;
+  /** Overall pipeline deadline in ms. @default 60000 */
+  timeoutMs?: number;
 }
+
+/** Ceiling for the whole OCR pipeline — each engine call may take up to 30 s
+ *  individually, but callers must never wait on the full chain. */
+const DEFAULT_PIPELINE_TIMEOUT_MS = 60_000;
 
 interface ImageMeta {
   width: number;
@@ -164,7 +170,32 @@ export async function getSlipAmount(
   bankCode?: string,
   options: AmountOptions = {}
 ): Promise<AmountResult> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PIPELINE_TIMEOUT_MS;
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`amount: OCR pipeline exceeded ${timeoutMs} ms`)),
+      timeoutMs
+    );
+  });
   try {
+    return await Promise.race([pipeline(imageBuffer, bankCode, options), deadline]);
+  } catch (error: unknown) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ',
+      amounts: [],
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function pipeline(
+  imageBuffer: Buffer,
+  bankCode: string | undefined,
+  options: AmountOptions
+): Promise<AmountResult> {
     // Gate the format before any libvips decode: only slip photo formats
     // (JPEG/PNG/WebP) are processed. See util/image-format.
     if (!sniffImageFormat(imageBuffer)) {
@@ -343,13 +374,6 @@ export async function getSlipAmount(
 
     const amounts = Array.from(uniqueAmounts);
     return { success: amounts.length > 0, amounts, counts: Object.fromEntries(agreement), source: bestSource, confidence: bestConfidence || undefined };
-  } catch (error: unknown) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ',
-      amounts: [],
-    };
-  }
 }
 
 export default getSlipAmount;

@@ -44,11 +44,15 @@ export function parseEmvcoTlv(payload: string, options: ParseTlvOptions = {}): E
   const amountStr = tags['54'];
   let amount: number | undefined;
   if (amountStr !== undefined) {
-    // Only trust a well-formed positive amount; a garbage/NaN/zero tag-54
-    // (crafted QR) must not flow into amount checks or API URLs downstream.
-    const parsed = parseFloat(amountStr);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      amount = parsed;
+    // EMVCo tag 54 is a plain numeric string (up to 13 digits, 2 decimals).
+    // Only trust well-formed positive values — exponent notation ("1e+21"),
+    // garbage or zero (crafted QR) must never reach amount checks or API
+    // URLs downstream.
+    if (/^\d{1,13}(\.\d{1,2})?$/.test(amountStr)) {
+      const parsed = parseFloat(amountStr);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        amount = parsed;
+      }
     }
   }
   const crc = tags['63'];

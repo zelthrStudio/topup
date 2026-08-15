@@ -17,6 +17,11 @@ export interface ParseTlvOptions {
 /** EMVCo merchant/biller account tags (26-51). */
 export const MERCHANT_TAG_RE = /^(2[6-9]|3[0-9]|4[0-9]|5[01])$/;
 
+/** Nesting ceiling: TLV values are bounded by payload length, but a crafted
+ *  payload could nest hundreds of levels and overflow the stack during
+ *  recursive descent. Anything deeper is treated as a leaf. */
+const MAX_TLV_DEPTH = 32;
+
 /**
  * TLV (tag/length/value) parser used by all Thai QR formats. Tags and lengths
  * are two decimal digits each.
@@ -25,9 +30,17 @@ export const MERCHANT_TAG_RE = /^(2[6-9]|3[0-9]|4[0-9]|5[01])$/;
  * Strict: throws QrParseError on the first structural violation.
  */
 export function parseTlv(payload: string, options: ParseTlvOptions = {}): ParsedTlv {
+  return parseTlvDepth(payload, options, 0);
+}
+
+function parseTlvDepth(payload: string, options: ParseTlvOptions, depth: number): ParsedTlv {
   const { strict = false } = options;
   if (payload.length === 0) {
     if (strict) throw new QrParseError('tlv: empty payload');
+    return { tags: {}, children: {} };
+  }
+  if (depth >= MAX_TLV_DEPTH) {
+    if (strict) throw new QrParseError('tlv: nesting exceeds safety limit');
     return { tags: {}, children: {} };
   }
   const tags: Record<string, string> = {};
@@ -52,7 +65,7 @@ export function parseTlv(payload: string, options: ParseTlvOptions = {}): Parsed
     }
     tags[tag] = value;
     if (MERCHANT_TAG_RE.test(tag) || tag === '62') {
-      children[tag] = parseTlv(value, options);
+      children[tag] = parseTlvDepth(value, options, depth + 1);
     }
   }
   if (strict && pos < payload.length) {

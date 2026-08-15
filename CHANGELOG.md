@@ -2,6 +2,40 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased] — audit round 2 (CRC, redirects, budgets)
+
+### Fixed
+- **Correctness:** `crc16ccitt()` now checksums the payload's **UTF-8 bytes**
+  (ISO/IEC 13239) instead of UTF-16 code units. Thai merchant names (tag 59)
+  on real merchant QRs made the old checksum differ from the one the banks
+  compute, rejecting valid slips with `CrcValidationError`.
+- **Security:** `resolveAmount()` trusts the QR amount only when the payload
+  carries no CRC claim or the claimed tag-63 CRC verifies — a tampered
+  payload with a wrong CRC can no longer override what OCR reads from the
+  actual slip.
+- **Security:** tag-54 amounts must be plain numeric strings (≤13 digits,
+  2 decimals); exponent/garbage values like "1e+21" can no longer reach the
+  Slip Verify URL path.
+- **Security:** the HTTP client sets `redirect: 'error'` — a 307/308 from a
+  compromised API can no longer re-POST the slip image / gift code to an
+  attacker-controlled host.
+- **Security:** `decodeQr()` enforces dimension/pixel caps (16384 px,
+  40 MP) and a 30 s scan deadline; a pathological image can no longer force
+  a multi-hundred-MB RGBA decode or an unbounded WASM detect.
+- **Availability:** tesseract worker creation races a 60 s deadline and
+  fails fast when the shipped `eng.traineddata` is missing (no silent CDN
+  hang); worker-pool waiters time out after 90 s instead of waiting forever
+  when a replacement spawn fails.
+- **Availability:** `getSlipAmount()` races an overall 60 s pipeline deadline
+  (`options.timeoutMs`) — the sequential engine attempts can no longer chain
+  into minutes of CPU.
+- `HttpError` messages are capped at 2000 chars (server-controlled text is
+  no longer logged verbatim in full).
+- `extractRedeemAmount()` also recognizes `redeemed_amount`.
+- `parseTlv()` caps nesting at 32 levels — crafted deep nesting can no
+  longer overflow the stack.
+- `TESSERACT_MAX_WORKERS` is clamped to 1–8 (each worker holds ~200 MB).
+
 ## [Unreleased] — whole-baht OCR amounts
 
 ### Fixed

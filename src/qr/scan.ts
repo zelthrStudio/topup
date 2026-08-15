@@ -7,6 +7,15 @@ import { parseEmvco, type DecodedQr } from './parse';
 /** Scales (relative to source) at which the WeChat detector is tried. */
 const SCALES = [1, 0.75, 0.5, 2];
 
+/** Per-scan deadline; the WASM detector itself cannot be cancelled, but
+ *  callers must not block on a pathological image. */
+const SCAN_TIMEOUT_MS = 30_000;
+
+/** Dimension/pixel caps mirroring the bank() upload guards: an image at or
+ *  beyond these would decode to hundreds of MB of RGBA for no benefit. */
+const MAX_DIMENSION = 16_384;
+const MAX_PIXELS = 40_000_000;
+
 /**
  * Only attempt a 2x upscale when the source is small enough that enlarging it
  * could actually rescue a decode. Upscaling a tall camera photo adds no
@@ -68,6 +77,11 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
     return null;
   }
   if (width === 0 || height === 0) return null;
+  if (Math.max(width, height) > MAX_DIMENSION || width * height > MAX_PIXELS) {
+    throw new ValidationError(
+      `decodeQr: image exceeds ${MAX_DIMENSION}px per side or ${MAX_PIXELS} pixels`
+    );
+  }
 
   const scanner = await getScanner();
   const scan = scanner.scan as (input: ScanInput) => Promise<ScanResult>;
@@ -102,11 +116,29 @@ export async function decodeQr(image: Buffer): Promise<DecodedQr | null> {
     }
     // Zero-copy view: cv.imread requires a Uint8ClampedArray and copies it into
     // the WASM heap anyway, so an extra full copy here would be purely additive.
-    const result = await scan({
-      data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
-      width: w,
-      height: h,
+    let result: ScanResult | null = null;
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`decodeQr: scan exceeded ${SCAN_TIMEOUT_MS} ms`)),
+        SCAN_TIMEOUT_MS
+      );
     });
+    try {
+      result = await Promise.race([
+        scan({
+          data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
+          width: w,
+          height: h,
+        }),
+        deadline,
+      ]);
+    } catch {
+      // Scan failed or timed out on this scale — nothing more to gain.
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     const payload = result?.text;
     if (!payload) continue;
     return parseEmvco(payload);

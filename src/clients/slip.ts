@@ -98,7 +98,13 @@ async function resolveAmount(image: Buffer): Promise<number> {
     const qr = await decodeQr(image);
     if (qr) {
       bankCode = qr.slipCheck?.bankCode ?? qr.emvco?.accounts[0]?.bankCode;
-      if (qr.emvco?.amount != null && Number.isFinite(qr.emvco.amount)) return qr.emvco.amount;
+      const emv = qr.emvco;
+      // Trust the QR amount only when the payload either carries no CRC claim
+      // (many real PromptPay QRs have no tag 63) or the claimed CRC verifies.
+      // A payload that claims a CRC but fails it is tampered/corrupt — never
+      // let its amount win over what OCR reads from the actual slip.
+      const crcOk = emv === undefined || emv.raw['63'] === undefined || emv.crcValid === true;
+      if (crcOk && emv?.amount != null && Number.isFinite(emv.amount)) return emv.amount;
     }
   } catch {
     // QR failed — fall through to OCR.

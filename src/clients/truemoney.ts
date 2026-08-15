@@ -21,7 +21,7 @@ export interface TruemoneyOptions {
  * Keys commonly used by the TrueMoney redeem response for the baht amount.
  * Nested paths are scanned recursively when the top-level keys are absent.
  */
-const AMOUNT_KEY_RE = /^(amount|amount_baht|redeem_amount|net_amount|total_amount|amounts)$/i;
+const AMOUNT_KEY_RE = /^(amount|amount_baht|redeem_amount|redeemed_amount|net_amount|total_amount|amounts)$/i;
 
 /** Coerce a candidate value to a finite baht number, or undefined. */
 function toBaht(value: unknown): number | undefined {

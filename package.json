@@ -1,6 +1,6 @@
 ﻿{
   "name": "@zelthr/topup",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "TrueMoney gift-code redemption and Thai bank-slip verification: QR decode (PromptPay EMVCo + slip-check Mini-QR with CRC validation), local OCR amount extraction, and Slip Verify/TrueMoney API clients.",
   "type": "commonjs",
   "main": "dist/index.js",

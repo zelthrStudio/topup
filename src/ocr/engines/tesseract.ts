@@ -2,9 +2,23 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const TESSERACT_TIMEOUT_MS = 30_000;
+const TESSERACT_SPAWN_TIMEOUT_MS = 60_000;
+const TESSERACT_WAIT_TIMEOUT_MS = 90_000;
 const TESSERACT_MAX_CONSECUTIVE_FAILURES = 3;
-const TESSERACT_MAX_WORKERS = Number(
-  process.env.TESSERACT_MAX_WORKERS ?? process.env.TESSERACT_WORKERS ?? 3
+
+/** Clamp the worker-count env var to sane bounds: NaN → default, extremes
+ *  (each worker holds ~200MB) → capped. */
+function clampWorkers(raw: string | undefined, fallback: number, min: number, max: number): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+const TESSERACT_MAX_WORKERS = clampWorkers(
+  process.env.TESSERACT_MAX_WORKERS ?? process.env.TESSERACT_WORKERS,
+  3,
+  1,
+  8
 );
 
 const DEBUG = process.env.TOPUP_DEBUG === '1';
@@ -50,14 +64,30 @@ function getTesseractModule(): Promise<TesseractModule> {
 }
 
 async function spawnTesseractWorker(): Promise<TesseractWorker> {
+  if (!LOCAL_LANG_DIR) {
+    // Fail fast instead of silently hitting the tesseract.js CDN: the local
+    // traineddata ships with the package, so a missing file means a broken
+    // install, not a network fallback worth hanging on.
+    throw new Error('tesseract: eng.traineddata not found next to the package — reinstall the package');
+  }
   const { createWorker } = await getTesseractModule();
-  const worker = await createWorker(
-    'eng',
-    undefined,
-    LOCAL_LANG_DIR ? { langPath: LOCAL_LANG_DIR, gzip: false } : undefined
-  );
-  await worker.setParameters({ tessedit_char_whitelist: '0123456789,.' });
-  return worker;
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`tesseract: worker creation timed out after ${TESSERACT_SPAWN_TIMEOUT_MS} ms`)),
+      TESSERACT_SPAWN_TIMEOUT_MS
+    );
+  });
+  try {
+    const worker = await Promise.race([
+      createWorker('eng', undefined, { langPath: LOCAL_LANG_DIR, gzip: false }),
+      deadline,
+    ]);
+    await worker.setParameters({ tessedit_char_whitelist: '0123456789,.' });
+    return worker;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 const tesseractWorkers = new Set<TesseractWorker>();
@@ -99,7 +129,23 @@ async function acquireTesseractWorker(): Promise<TesseractWorker> {
       tesseractSpawning -= 1;
     }
   }
-  return new Promise<TesseractWorker>((resolve, reject) => tesseractWaiters.push({ resolve, reject }));
+  return new Promise<TesseractWorker>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const idx = tesseractWaiters.findIndex((w) => w.resolve === resolve);
+      if (idx !== -1) tesseractWaiters.splice(idx, 1);
+      reject(new Error(`tesseract: timed out waiting for a worker after ${TESSERACT_WAIT_TIMEOUT_MS} ms`));
+    }, TESSERACT_WAIT_TIMEOUT_MS);
+    tesseractWaiters.push({
+      resolve: (worker) => {
+        clearTimeout(timer);
+        resolve(worker);
+      },
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    });
+  });
 }
 
 function releaseTesseractWorker(worker: TesseractWorker): void {

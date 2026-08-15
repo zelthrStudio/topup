@@ -7,11 +7,17 @@
 /**
  * Compute the CRC-16/CCITT-FALSE checksum of a payload string.
  * Returns the 4-character uppercase hex value.
+ *
+ * The checksum runs over the payload's UTF-8 bytes (per ISO/IEC 13239 usage
+ * in the Thai QR specs) — never UTF-16 code units. Thai merchant names in
+ * tag 59 are routine, so iterating charCodeAt() would hash the wrong bytes
+ * and reject valid slips.
  */
 export function crc16ccitt(payload: string): string {
+  const bytes = Buffer.from(payload, 'utf8');
   let crc = 0xffff;
-  for (let i = 0; i < payload.length; i++) {
-    crc ^= payload.charCodeAt(i) << 8;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i] << 8;
     for (let b = 0; b < 8; b++) {
       crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
     }

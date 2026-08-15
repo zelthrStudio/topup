@@ -35,6 +35,12 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ fee: { amount: 50 }, amount: 100 }));
       return;
     }
+    if (req.url.includes('REDIRECT')) {
+      res.statusCode = 307;
+      res.setHeader('Location', 'http://127.0.0.1:9/evil');
+      res.end();
+      return;
+    }
     const statusMatch = req.url.match(/^\/status\/(\d+)/);
     if (statusMatch) {
       const status = Number(statusMatch[1]);
@@ -305,6 +311,53 @@ test('parseEmvco surfaces crcValid on a well-formed EMVCo payload', () => {
   assert.equal(qr.emvco?.crcValid, true);
   const bad = api().parseEmvco(`${body}63040000`);
   assert.equal(bad.crcValid, false);
+});
+
+function crcOverUtf16(payload) {
+  let crc = 0xffff;
+  for (let i = 0; i < payload.length; i++) {
+    crc ^= payload.charCodeAt(i) << 8;
+    for (let b = 0; b < 8; b++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+test('CRC hashes UTF-8 bytes — Thai merchant names verify (regression)', () => {
+  const body = '00020101021229370016A000000677010111011300668123456785303764540580.005802TH5917ร้านอาหารยอดเยี่ยม';
+  const payload = `${body}6304${api().crc16ccitt(`${body}6304`)}`;
+  assert.equal(api().verifyCrc(payload, '63'), true);
+  // A UTF-16 code-unit checksum (the old bug) differs for non-ASCII payloads.
+  assert.notEqual(payload.slice(-4), crcOverUtf16(`${body}6304`));
+});
+
+test('parseEmvco ignores exponent/garbage tag-54 amounts', () => {
+  const qr = api().parseEmvco('00020101021229370016A00000067701011101130066812345678530376454051e+215802TH');
+  assert.equal(qr.amount, undefined);
+  const ok = api().parseEmvco('00020101021229370016A000000677010111011300668123456785303764540580.005802TH');
+  assert.equal(ok.amount, 80);
+});
+
+test('parseTlv caps nesting depth — crafted deep nesting cannot overflow', () => {
+  let leaf = '6202AB';
+  for (let i = 0; i < 300; i++) leaf = `6204${leaf}`;
+  const payload = `000201${leaf}`;
+  const qr = api().parseEmvco(payload);
+  assert.equal(qr.payload, payload);
+});
+
+test('getSlipAmount honors an overall pipeline deadline', async (t) => {
+  const file = path.join(__dirname, 'test1.jpg');
+  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const res = await api().getSlipAmount(fs.readFileSync(file), '004', { timeoutMs: 1 });
+  assert.equal(res.success, false);
+  assert.match(res.error, /exceeded 1 ms/);
+});
+
+test('clients never follow redirects (bodies are not re-POSTed)', async () => {
+  await assert.rejects(
+    () => api().truemoney('REDIRECT', '0812345678'),
+    (err) => err instanceof api().HttpError && /request failed/.test(err.message)
+  );
 });
 
 // --- Input validation ---

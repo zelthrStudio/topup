@@ -6,6 +6,16 @@ export type { TopupApiError, TopupApiResponse } from '../types';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
 
+/** Server-controlled text is capped before it reaches error messages, which
+ *  consumers often log. */
+const MAX_ERROR_MESSAGE_CHARS = 2000;
+
+function capText(text: string): string {
+  return text.length > MAX_ERROR_MESSAGE_CHARS
+    ? `${text.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`
+    : text;
+}
+
 export interface PostOptions {
   /** Request deadline in ms. @default 30000 */
   timeoutMs?: number;
@@ -46,6 +56,9 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
   try {
     res = await fetch(url, {
       method: 'POST',
+      // Never follow redirects: a 307/308 would re-POST the request body
+      // (the slip image / gift code) to whatever host the server points at.
+      redirect: 'error',
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
@@ -68,13 +81,13 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
 
   if (!res.ok) {
     if (typeof payload === 'object' && payload !== null) {
-      throw new HttpError(String(payload.slug || payload.message || `HTTP ${res.status}`), {
+      throw new HttpError(capText(String(payload.slug || payload.message || `HTTP ${res.status}`)), {
         status: res.status,
-        slug: typeof payload.slug === 'string' ? payload.slug : undefined,
+        slug: typeof payload.slug === 'string' ? capText(payload.slug) : undefined,
         body: payload,
       });
     }
-    throw new HttpError(`HTTP ${res.status}: ${payload}`, { status: res.status, body: payload });
+    throw new HttpError(`HTTP ${res.status}: ${capText(String(payload))}`, { status: res.status, body: payload });
   }
   return payload;
 }
