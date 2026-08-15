@@ -155,10 +155,10 @@ test('bank throws on unknown mode', async () => {
 // --- QR (EMVCo / Mini-QR) & Slip Verification Tests ---
 
 test('decodeQr reads a real slip QR and parses its bank/account info', async (t) => {
-  const file = path.join(__dirname, 'test1.jpg');
-  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
   const qr = await api().decodeQr(fs.readFileSync(file));
-  assert.ok(qr, 'expected a QR code in test1.jpg');
+  assert.ok(qr, 'expected a QR code in กสิกรไทย.jpg');
   assert.match(qr.payload, /^00\d{2}/);
   assert.equal(qr.accounts[0]?.bankCode, '004', 'bank code from QR sub-tag 01');
   assert.equal(qr.accounts[0]?.accountId, '016218195650BPP03857', 'transaction ref from QR sub-tag 02');
@@ -168,10 +168,10 @@ test('decodeQr reads a real slip QR and parses its bank/account info', async (t)
 });
 
 test('decodeQr reads the QR of the second real slip', async (t) => {
-  const file = path.join(__dirname, 'test.jpg');
-  if (!fs.existsSync(file)) return t.skip('test.jpg not present');
+  const file = path.join(__dirname, 'กรุงศรี.jpg');
+  if (!fs.existsSync(file)) return t.skip('กรุงศรี.jpg not present');
   const qr = await api().decodeQr(fs.readFileSync(file));
-  assert.ok(qr, 'expected a QR code in test.jpg');
+  assert.ok(qr, 'expected a QR code in กรุงศรี.jpg');
   assert.match(qr.payload, /^00\d{2}/);
   assert.equal(qr.accounts[0]?.bankCode, '025', 'Krungsri bank code');
   assert.equal(qr.transRef, 'KSA0000000077724361504388');
@@ -191,18 +191,18 @@ test('parseEmvco parses PromptPay EMVCo dynamic QR with amount', () => {
 });
 
 test('getSlipAmount extracts amount from slip images via OCR', async (t) => {
-  const file1 = path.join(__dirname, 'test1.jpg');
+  const file1 = path.join(__dirname, 'กสิกรไทย.jpg');
   if (fs.existsSync(file1)) {
     const res1 = await api().getSlipAmount(fs.readFileSync(file1), '004');
-    assert.ok(res1.success, 'OCR should succeed on test1.jpg');
-    assert.ok(res1.amounts.includes(80), 'test1.jpg should contain amount 80');
+    assert.ok(res1.success, 'OCR should succeed on กสิกรไทย.jpg');
+    assert.ok(res1.amounts.includes(80), 'กสิกรไทย.jpg should contain amount 80');
   }
 
-  const file2 = path.join(__dirname, 'test.jpg');
+  const file2 = path.join(__dirname, 'กรุงศรี.jpg');
   if (fs.existsSync(file2)) {
     const res2 = await api().getSlipAmount(fs.readFileSync(file2), '025');
-    assert.ok(res2.success, 'OCR should succeed on test.jpg');
-    assert.ok(res2.amounts.includes(500), 'test.jpg should contain amount 500');
+    assert.ok(res2.success, 'OCR should succeed on กรุงศรี.jpg');
+    assert.ok(res2.amounts.includes(500), 'กรุงศรี.jpg should contain amount 500');
   }
 });
 
@@ -254,15 +254,31 @@ test('bank localOCR on the Paotang slip posts qrcode_data to /api/slip/5/no_slip
   assert.ok(res.body.qrcode_data && !res.body.img, 'qrcode_data sent, image not re-uploaded');
 });
 
+test('GSB (ออมสิน) slip (whole-baht 50) extracts 50 via the 030 profile', async (t) => {
+  const file = path.join(__dirname, 'ออมสิน.jpg');
+  if (!fs.existsSync(file)) return t.skip('ออมสิน.jpg not present');
+  const res = await api().getSlipAmount(fs.readFileSync(file), '030');
+  assert.ok(res.success, 'OCR should succeed on the GSB slip');
+  assert.ok(res.amounts.includes(50), `expected amount 50, got ${JSON.stringify(res.amounts)}`);
+});
+
+test('bank localOCR on the GSB slip posts qrcode_data to /api/slip/50/no_slip', async (t) => {
+  const file = path.join(__dirname, 'ออมสิน.jpg');
+  if (!fs.existsSync(file)) return t.skip('ออมสิน.jpg not present');
+  const res = await api().bank(fs.readFileSync(file).toString('base64'), 'localOCR');
+  assert.equal(res.url, '/api/slip/50/no_slip');
+  assert.ok(res.body.qrcode_data && !res.body.img, 'qrcode_data sent, image not re-uploaded');
+});
+
 test('bank localOCR resolves real slip images and hits /no_slip routes', async (t) => {
-  const file1 = path.join(__dirname, 'test1.jpg');
+  const file1 = path.join(__dirname, 'กสิกรไทย.jpg');
   if (fs.existsSync(file1)) {
     const res1 = await api().bank(fs.readFileSync(file1).toString('base64'), 'localOCR');
     assert.equal(res1.url, '/api/slip/80/no_slip');
     assert.equal(res1.body.tos, true);
   }
 
-  const file2 = path.join(__dirname, 'test.jpg');
+  const file2 = path.join(__dirname, 'กรุงศรี.jpg');
   if (fs.existsSync(file2)) {
     const res2 = await api().bank(fs.readFileSync(file2).toString('base64'), 'localOCR');
     assert.equal(res2.url, '/api/slip/500/no_slip');
@@ -271,8 +287,8 @@ test('bank localOCR resolves real slip images and hits /no_slip routes', async (
 });
 
 test('parseEmvco re-parses the real QR payload consistently', async (t) => {
-  const file = path.join(__dirname, 'test1.jpg');
-  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
   const qr = await api().decodeQr(fs.readFileSync(file));
   assert.ok(qr);
   const again = api().parseEmvco(qr.payload);
@@ -282,8 +298,8 @@ test('parseEmvco re-parses the real QR payload consistently', async (t) => {
 // --- CRC verification ---
 
 test('slip-check QR from a real slip has a valid CRC (tag 91)', async (t) => {
-  const file = path.join(__dirname, 'test1.jpg');
-  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
   const qr = await api().decodeQr(fs.readFileSync(file));
   assert.ok(qr?.slipCheck, 'expected a slip-check QR');
   assert.ok(qr.slipCheck.crc, 'expected a CRC tag');
@@ -291,8 +307,8 @@ test('slip-check QR from a real slip has a valid CRC (tag 91)', async (t) => {
 });
 
 test('slip-check QR from the second real slip has a valid CRC', async (t) => {
-  const file = path.join(__dirname, 'test.jpg');
-  if (!fs.existsSync(file)) return t.skip('test.jpg not present');
+  const file = path.join(__dirname, 'กรุงศรี.jpg');
+  if (!fs.existsSync(file)) return t.skip('กรุงศรี.jpg not present');
   const qr = await api().decodeQr(fs.readFileSync(file));
   assert.ok(qr?.slipCheck, 'expected a slip-check QR');
   assert.equal(qr.crcValid, true);
@@ -354,8 +370,8 @@ test('parseTlv caps nesting depth — crafted deep nesting cannot overflow', () 
 });
 
 test('getSlipAmount honors an overall pipeline deadline', async (t) => {
-  const file = path.join(__dirname, 'test1.jpg');
-  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
   const res = await api().getSlipAmount(fs.readFileSync(file), '004', { timeoutMs: 1 });
   assert.equal(res.success, false);
   assert.match(res.error, /exceeded 1 ms/);
@@ -452,8 +468,8 @@ test('bank localOCR rejects non-image base64 data', async () => {
 });
 
 test('bank manual with a real slip image posts qrcode_data to /no_slip', async (t) => {
-  const file = path.join(__dirname, 'test1.jpg');
-  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
   const img = fs.readFileSync(file).toString('base64');
   const res = await api().bank(img, 'manual', 80);
   assert.equal(res.url, '/api/slip/80/no_slip');
@@ -700,8 +716,8 @@ test('bank rejects non-photo formats (GIF/TIFF) before libvips decodes them', as
 // --- OCR confidence / source ---
 
 test('getSlipAmount reports source and confidence for real slips', async (t) => {
-  const file = path.join(__dirname, 'test1.jpg');
-  if (!fs.existsSync(file)) return t.skip('test1.jpg not present');
+  const file = path.join(__dirname, 'กสิกรไทย.jpg');
+  if (!fs.existsSync(file)) return t.skip('กสิกรไทย.jpg not present');
   const res = await api().getSlipAmount(fs.readFileSync(file), '004');
   assert.equal(res.success, true);
   assert.ok(['fast', 'guten', 'tesseract'].includes(res.source), `unexpected source ${res.source}`);
