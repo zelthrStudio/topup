@@ -19,13 +19,14 @@ export type BankMode = 'OCR' | 'LOCALOCR' | 'MANUAL';
 const CONSENT = { tos: true, privacy: true, eula: true } as const;
 
 const DATA_URI_RE = /^data:/i;
-// Bare base64 must be padded (length % 4 === 0); this keeps long raw QR
-// payloads (EMVCo/slip-check data, almost never a multiple of four) from
-// being misclassified as image data in MANUAL mode. QR payloads are also
-// identified by their distinctive prefixes before the base64 heuristic runs:
-// real image base64 never starts with "000201" (JPEG/PNG/WebP magic bytes
-// rule it out), and slip-check headers start with a tag-00 TLV.
-const BASE64_IMAGE_RE = /^[A-Za-z0-9+/=]{600,}$/;
+// Bare base64 must look like a supported image: JPEG (`/9j/` = FF D8 FF),
+// PNG (`iVBORw0KGgo` = 89 50 4E 47) or WebP/RIFF (`UklGR` = RIFF...WEBP)
+// magic bytes in the base64 prefix. Length is only a hint — a long
+// base64-shaped string that is not one of these formats (e.g. a numeric
+// loyalty QR payload) is QR data, never an image, so it is routed to the
+// QR path instead of being rejected as a bad image. EMVCo/slip-check QR
+// payloads never carry image magic bytes, so they naturally stay QR data.
+const IMAGE_B64_PREFIX_RE = /^(\/9j\/|iVBORw0KGgo|UklGR)/;
 const EMVCO_PREFIX_RE = /^000201/;
 
 function looksLikeQrPayload(data: string): boolean {
@@ -43,7 +44,9 @@ const MAX_PIXELS = 40_000_000;
 const MAX_DIMENSION = 16_384;
 
 function isImageData(data: string): boolean {
-  return DATA_URI_RE.test(data) || (BASE64_IMAGE_RE.test(data) && data.length % 4 === 0);
+  if (DATA_URI_RE.test(data)) return true;
+  if (data.length % 4 !== 0) return false;
+  return IMAGE_B64_PREFIX_RE.test(data);
 }
 
 function normalizeImage(data: string): string {
@@ -114,7 +117,10 @@ interface ResolvedSlip {
  *
  * The decoded QR payload is returned alongside the amount so callers can send
  * it through the `/no_slip` route instead of re-uploading the image.
- * `knownAmount` (MANUAL mode with an explicit amount) skips the OCR chain.
+ * `knownAmount` (MANUAL mode with an explicit amount) is authoritative: it
+ * skips the OCR chain AND wins over any amount encoded in the QR, so a caller
+ * supplied value (e.g. a server-side order amount) can never be overridden by
+ * attacker-influenceable data embedded in the uploaded image.
  */
 async function resolveSlip(image: Buffer, knownAmount?: number): Promise<ResolvedSlip> {
   let qrcodeData: string | null = null;
@@ -128,9 +134,10 @@ async function resolveSlip(image: Buffer, knownAmount?: number): Promise<Resolve
       // Trust the QR amount only when the payload either carries no CRC claim
       // (many real PromptPay QRs have no tag 63) or the claimed CRC verifies.
       // A payload that claims a CRC but fails it is tampered/corrupt — never
-      // let its amount win over what OCR reads from the actual slip.
+      // let its amount win over what OCR reads from the actual slip. An
+      // explicit MANUAL amount is always authoritative regardless (see above).
       const crcOk = emv === undefined || emv.raw['63'] === undefined || emv.crcValid === true;
-      if (crcOk && emv?.amount != null && Number.isFinite(emv.amount)) {
+      if (knownAmount === undefined && crcOk && emv?.amount != null && Number.isFinite(emv.amount)) {
         return { amount: emv.amount, qrcodeData };
       }
     }

@@ -459,12 +459,13 @@ test('truemoney rejects an invalid expected amount', async () => {
 
 test('bank OCR rejects non-image base64 data', async () => {
   const fake = Buffer.from('this is definitely not an image').toString('base64').repeat(20);
-  await assert.rejects(() => api().bank(fake, 'OCR'), /not a valid image/);
+  // No image magic bytes in the base64 prefix -> not image data at all.
+  await assert.rejects(() => api().bank(fake, 'OCR'), /requires image data/);
 });
 
 test('bank localOCR rejects non-image base64 data', async () => {
   const fake = Buffer.from('this is definitely not an image').toString('base64').repeat(20);
-  await assert.rejects(() => api().bank(fake, 'localOCR'), /not a valid image/);
+  await assert.rejects(() => api().bank(fake, 'localOCR'), /requires image data/);
 });
 
 test('bank manual with a real slip image posts qrcode_data to /no_slip', async (t) => {
@@ -474,10 +475,13 @@ test('bank manual with a real slip image posts qrcode_data to /no_slip', async (
   const res = await api().bank(img, 'manual', 80);
   assert.equal(res.url, '/api/slip/80/no_slip');
   assert.ok(res.body.qrcode_data && res.body.qrcode_data.length > 30, 'qrcode_data should be the decoded QR payload');
-  // Must exceed the 600-char base64 heuristic to be treated as image data.
+  // A long base64-shaped string WITHOUT image magic bytes (L-1) is QR data in
+  // MANUAL mode, not a mangled image: it is posted as qrcode_data as-is.
   const fake = Buffer.from('garbage bytes that are not an image at all').toString('base64').repeat(20);
-  assert.ok(fake.length > 600, 'garbage must pass the base64 heuristic');
-  await assert.rejects(() => api().bank(fake, 'manual', 80), /not a valid image/);
+  assert.ok(fake.length > 600, 'garbage must still be long');
+  const res2 = await api().bank(fake, 'manual', 80);
+  assert.equal(res2.url, '/api/slip/80/no_slip');
+  assert.equal(res2.body.qrcode_data, fake);
 });
 
 test('bank manual amount is bounded to THB-plausible values', async () => {
@@ -489,8 +493,8 @@ test('bank manual amount is bounded to THB-plausible values', async () => {
 });
 
 test('bank manual treats a long QR payload (not % 4) as raw QR data, not base64', async () => {
-  // 601 alnum characters: long enough for the base64 heuristic but not a
-  // multiple of four, so it must be handled as raw QR data in MANUAL mode.
+  // 601 alnum characters: too long for a padded base64 image (length % 4 !== 0)
+  // and carries no image magic bytes, so it must be QR data in MANUAL mode.
   const raw = '0'.repeat(601);
   const res = await api().bank(raw, 'manual', 100);
   assert.equal(res.url, '/api/slip/100/no_slip');
@@ -498,13 +502,27 @@ test('bank manual treats a long QR payload (not % 4) as raw QR data, not base64'
 });
 
 test('bank manual treats a %4-aligned EMVCo payload as QR data, not an image', async () => {
-  // 608 chars, length % 4 === 0: would previously trip the base64-image
-  // heuristic and fail with "not a valid image". The 000201 prefix must win.
+  // 608 chars, length % 4 === 0 and base64-shaped, but no image magic bytes:
+  // the 000201 QR prefix must still win over the base64 shape.
   const raw = '000201' + 'A'.repeat(602);
   assert.equal(raw.length % 4, 0);
   const res = await api().bank(raw, 'manual', 500);
   assert.equal(res.url, '/api/slip/500/no_slip');
   assert.equal(res.body.qrcode_data, raw);
+});
+
+test('bank manual explicit amount is authoritative over the QR amount (M-1)', async (t) => {
+  // A real EMVCo QR (valid CRC, amount 80) rendered to a PNG. The explicit
+  // MANUAL amount (500) must win: the caller's value is authoritative and an
+  // attacker-controlled image must never override it.
+  const qrcode = await import('@zelthr/qrcode');
+  const body = '00020101021229370016A000000677010111011300668123456785303764540580.005802TH';
+  const payload = `${body}6304${api().crc16ccitt(`${body}6304`)}`;
+  assert.equal(api().parseEmvco(payload).amount, 80);
+  const png = Buffer.from(qrcode.generate(payload, 'png'));
+  const res = await api().bank(png.toString('base64'), 'manual', 500);
+  assert.equal(res.url, '/api/slip/500/no_slip');
+  assert.equal(res.body.qrcode_data, payload);
 });
 
 test('decodeQr raises a clear error for HEIC instead of a silent "no QR"', async () => {

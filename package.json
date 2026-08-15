@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@gutenye/ocr-node": "^1.4.8",
-    "@zelthr/qrcode": "^0.1.0",
+    "@zelthr/qrcode": "^0.1.2",
     "@zelthr/request": "^1.1.2",
     "onnxruntime-node": "1.21.1",
     "sharp": "^0.33.3",
