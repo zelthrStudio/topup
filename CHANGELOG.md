@@ -2,7 +2,7 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
-## [Unreleased]
+## [3.0.0] — 2026-08-17
 
 ### Changed (breaking)
 - **API-only package.** Everything not backed by the zelthrStudio Open API
