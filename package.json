@@ -1,6 +1,6 @@
 {
   "name": "@zelthr/topup",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "TrueMoney gift-code redemption and Thai bank-slip verification through the zelthrStudio Open API gateway — no local scanning, no native dependencies.",
   "type": "commonjs",
   "main": "dist/index.js",
