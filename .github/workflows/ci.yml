@@ -39,18 +39,16 @@ jobs:
       - name: Package
         run: npm pack
 
-      - name: Consumer smoke test (install tarball, require + import)
+- name: Consumer smoke test (install tarball, require + import)
         shell: bash
         run: |
           set -euxo pipefail
           TARBALL=$(ls zelthr*.tgz | head -n1)
           TMP=$(mktemp -d)
-          cp "$TARBALL" scripts/consumer-smoke/smoke.cjs scripts/consumer-smoke/smoke.mjs test/กสิกรไทย.jpg "$TMP/"
+          cp "$TARBALL" scripts/consumer-smoke/smoke.cjs scripts/consumer-smoke/smoke.mjs "$TMP/"
           cd "$TMP"
           npm init -y >/dev/null
-          # Allow native install scripts so onnxruntime/sharp are fully set up.
-          node -e "const fs=require('fs');const p=require('./package.json');p.allowScripts={sharp:true,'onnxruntime-node':true,'tesseract.js':true};fs.writeFileSync('./package.json',JSON.stringify(p,null,2))"
-          npm install "./$TARBALL" --no-audit --no-fund --ignore-scripts=false >/dev/null
+          npm install "./$TARBALL" --no-audit --no-fund >/dev/null
           node smoke.cjs
           node smoke.mjs
 

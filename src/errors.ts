@@ -29,22 +29,6 @@ export class CrcValidationError extends TopupError {
   }
 }
 
-/** An OCR engine (Guten/ONNX or tesseract) failed. */
-export class OcrError extends TopupError {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'OcrError';
-  }
-}
-
-/** An OCR call exceeded its deadline. */
-export class OcrTimeoutError extends OcrError {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'OcrTimeoutError';
-  }
-}
-
 /** An outbound HTTP request exceeded its deadline. */
 export class TimeoutError extends TopupError {
   constructor(message: string, options?: { cause?: unknown }) {

@@ -1,5 +1,4 @@
-/** QR domain facade — public parsers, decoder and their types. */
-export { decodeQr } from './scan';
+/** QR domain facade — public parsers, generator and their types. */
 export { parseEmvco } from './parse';
 export { verifyCrc, crc16ccitt } from './crc';
 export type { DecodedAccount, DecodedQr } from './parse';

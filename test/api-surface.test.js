@@ -18,18 +18,10 @@ const RUNTIME_EXPORTS = [
   'ValidationError',
   'QrParseError',
   'CrcValidationError',
-  'OcrError',
-  'OcrTimeoutError',
   'TimeoutError',
   'HttpError',
   'AmountMismatchError',
-  'getSlipAmount',
-  'CROP_PROFILES',
-  'extractAmounts',
-  'isLikelyAmount',
-  'warmupAmountExtractor',
-  'terminateAmountExtractor',
-  'decodeQr',
+  'AmountVerificationError',
   'parseEmvco',
   'parseSlipCheck',
   'verifyCrc',
@@ -47,15 +39,14 @@ test('all public runtime exports are present', () => {
 
 test('all public functions are callable', () => {
   const mod = api();
-  const callables = RUNTIME_EXPORTS.filter(
-    (n) => !n.endsWith('_BASE') && n !== 'CROP_PROFILES' && n !== 'MAX_PROMPTPAY_AMOUNT'
-  );
+  const callables = RUNTIME_EXPORTS.filter((n) => !n.endsWith('_BASE') && n !== 'MAX_PROMPTPAY_AMOUNT');
   for (const name of callables) {
     assert.equal(typeof mod[name], 'function', `${name} should be a function`);
   }
   assert.equal(typeof mod.TMN_BASE, 'string');
   assert.equal(typeof mod.SLIP_BASE, 'string');
-  assert.ok(typeof mod.CROP_PROFILES, 'object');
+  assert.equal(mod.TMN_BASE, 'https://api.zelthr.rest');
+  assert.equal(mod.SLIP_BASE, 'https://api.zelthr.rest');
 });
 
 test('ESM wrapper (dist/index.mjs) mirrors the CJS surface', async () => {
@@ -74,8 +65,6 @@ test('every error class reports the right name, message, and hierarchy', () => {
     ['ValidationError', 'TopupError'],
     ['QrParseError', 'TopupError'],
     ['CrcValidationError', 'TopupError'],
-    ['OcrError', 'TopupError'],
-    ['OcrTimeoutError', 'OcrError'],
     ['TimeoutError', 'TopupError'],
     ['HttpError', 'TopupError'],
     ['AmountMismatchError', 'HttpError'],

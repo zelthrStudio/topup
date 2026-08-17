@@ -2,7 +2,7 @@ import { post } from './http';
 import { AmountMismatchError, AmountVerificationError, ValidationError } from '../errors';
 import type { TopupApiResponse } from '../types';
 
-/** TrueMoney redeem API base URL (override with TMN_API_URL). */
+/** zelthrStudio Open API gateway base URL (override with TMN_API_URL). */
 export const TMN_BASE: string = process.env.TMN_API_URL || 'https://api.zelthr.rest';
 
 /** Thai mobile number: exactly 10 digits (leading zero required). */
@@ -74,8 +74,9 @@ function validatePhone(phone: string): string | null {
 }
 
 /**
- * Redeem a TrueMoney gift code or URL for the given phone number.
- * A full gift URL is URL-encoded into the path.
+ * Redeem a TrueMoney gift code or URL for the given phone number through the
+ * zelthrStudio Open API gateway (`POST /tmn`). The gateway talks to the
+ * TrueMoney core itself — no voucher data leaves the gateway unencrypted.
  *
  * When options.amount is set, the redeemed amount reported by the API is
  * checked against it and a mismatch throws with slug "amount-mismatch".
@@ -93,10 +94,10 @@ export async function truemoney(
   if (options?.amount != null && (!Number.isFinite(options.amount) || options.amount < 0)) {
     throw new ValidationError('truemoney: amount must be a non-negative number');
   }
-  // Always URL-encode the code into the path so user input can never alter
-  // the API route (traversal / extra path segments / query parameters).
-  const code = encodeURIComponent(codeOrLink.trim());
-  const res = await post(`${TMN_BASE}/truemoney/${code}/${phone.trim().replace(/\s+/g, '')}`);
+  const res = await post(`${TMN_BASE}/tmn`, {
+    code: codeOrLink.trim(),
+    mobile: phone.trim().replace(/\s+/g, ''),
+  });
 
   if (options?.amount != null && res !== null && typeof res === 'object') {
     const redeemed = extractRedeemAmount(res);

@@ -2,7 +2,35 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
-## [1.1.3] — 2026-08-16
+## [2.0.0] — 2026-08-17
+
+### Changed (breaking)
+- **Gateway-only clients.** `truemoney()` now calls `POST {TMN_BASE}/tmn` with
+  a JSON body `{ code, mobile }` and `bank()` calls `POST {SLIP_BASE}/slip`
+  with `{ img }` (base64 or data URI). The default base URL is the
+  zelthrStudio Open API gateway `https://api.zelthr.rest` (override with
+  `TMN_API_URL` / `SLIP_API_URL`).
+- **No local scanning.** The gateway runs the whole OCR pipeline (QR decode,
+  amount extraction, upstream verification). All local scanning machinery was
+  removed: the Guten OCR/ONNX + tesseract engines, the sharp image pipeline,
+  and image QR decoding.
+- **`bank()` signature simplified** to `bank(data)` — the `OCR`/`LOCALOCR`/
+  `MANUAL` modes and the `amount` argument are gone; the gateway has a single
+  upload flow.
+- **Dependencies pruned.** `sharp`, `tesseract.js`, `onnxruntime-node`,
+  `@gutenye/ocr-node` and the 5 MB `eng.traineddata` are no longer shipped;
+  the package now depends only on `@zelthr/request` and `@zelthr/qrcode`.
+  No install scripts, no native binaries.
+- **Removed exports:** `decodeQr`, `getSlipAmount`, `extractAmounts`,
+  `isLikelyAmount`, `CROP_PROFILES`, `warmupAmountExtractor`,
+  `terminateAmountExtractor`, `OcrError`, `OcrTimeoutError`.
+- **Kept exports:** pure string utilities `parseEmvco`, `parseSlipCheck`,
+  `verifyCrc`, `crc16ccitt` and the `getQrCodePromptPay` generator, plus the
+  full error hierarchy (minus `Ocr*`).
+
+### Fixed
+- Gift links are sent in the JSON body as-is (no URL path encoding), so a link
+  can no longer alter the gateway route.
 
 ### Changed
 - **`bank()` image modes verify through `/api/slip/{amount}/no_slip`.** The QR

@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import {
   bank,
   truemoney,
-  decodeQr,
+  post,
   parseEmvco,
   verifyCrc,
   crc16ccitt,
@@ -19,7 +19,6 @@ const require = createRequire(import.meta.url);
 // resolve, the ESM interop is solid.
 assert.equal(typeof bank, 'function');
 assert.equal(typeof truemoney, 'function');
-assert.equal(typeof decodeQr, 'function');
 assert.equal(typeof parseEmvco, 'function');
 assert.equal(typeof verifyCrc, 'function');
 
@@ -35,5 +34,16 @@ assert.equal(parseEmvco(payload).crcValid, true);
 // Both entry styles must see the SAME module instance (no dual-package hazard).
 const cjs = require('@zelthr/topup');
 assert.strictEqual(cjs.parseEmvco, parseEmvco, 'ESM and CJS must share the same instance');
+
+// Live gateway round-trip from ESM: a fake voucher returns the upstream
+// business response (200 + status.code); a malformed request surfaces the
+// gateway 400 as an HttpError.
+const res = await truemoney('0000000000000000', '0812345678');
+assert.ok(res !== null && typeof res === 'object', `expected an object, got ${res}`);
+assert.ok(typeof res.status?.code === 'string', `expected a status.code, got ${JSON.stringify(res)}`);
+
+const err = await post('https://api.zelthr.rest/tmn', { code: 'x' }).catch((e) => e);
+assert.ok(err instanceof HttpError, `expected HttpError, got ${err}`);
+assert.equal(err.status, 400);
 
 console.log('ESM consumer smoke: OK');
