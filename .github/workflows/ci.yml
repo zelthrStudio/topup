@@ -39,7 +39,7 @@ jobs:
       - name: Package
         run: npm pack
 
-- name: Consumer smoke test (install tarball, require + import)
+      - name: Consumer smoke test (install tarball, require + import)
         shell: bash
         run: |
           set -euxo pipefail
