@@ -1,38 +1,19 @@
 import { post } from './http';
 import { AmountMismatchError, AmountVerificationError, ValidationError } from '../errors';
-import type { TopupApiResponse } from '../types';
+import type { TopupApiResponse, TruemoneyOptions } from '../types';
 
-/** zelthrStudio Open API gateway base URL (override with TMN_API_URL). */
+export type { TruemoneyOptions };
+
 export const TMN_BASE: string = process.env.TMN_API_URL || 'https://api.zelthr.rest';
 
-/** Thai mobile number: exactly 10 digits (leading zero required). */
 const THAI_PHONE_RE = /^0\d{9}$/;
+const AMOUNT_KEY_RE = /^(amount|amount_baht|redeem_amount|redeemed_amount|redeemed_amount_baht|redeemed_baht|member_amount_baht|net_amount|total_amount|received_amount|paid_amount|amounts)$/i;
 
-/** Options for truemoney(). */
-export interface TruemoneyOptions {
-  /**
-   * Expected redemption amount (baht). When given, the response is scanned
-   * for the redeemed amount and a mismatch throws (slug "amount-mismatch").
-   */
-  amount?: number;
-}
-
-/**
- * Keys commonly used by the TrueMoney redeem response for the baht amount.
- * Nested paths are scanned recursively when the top-level keys are absent.
- */
-const AMOUNT_KEY_RE = /^(amount|amount_baht|redeem_amount|redeemed_amount|net_amount|total_amount|amounts)$/i;
-
-/** Coerce a candidate value to a finite baht number, or undefined. */
 function toBaht(value: unknown): number | undefined {
   const n = typeof value === 'string' ? parseFloat(value.replace(/[^\d.]/g, '')) : typeof value === 'number' ? value : NaN;
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Walk the response for a numeric baht amount, respecting common shapes.
- *  Top-level amount keys are preferred first so a nested fee breakdown or
- *  history entry can never shadow the real top-level amount; the deep walk
- *  only runs when no direct key matched. */
 function extractRedeemAmount(response: unknown): number | undefined {
   if (response === null || typeof response !== 'object') return undefined;
   const root = response as Record<string, unknown>;
@@ -59,28 +40,22 @@ function extractRedeemAmount(response: unknown): number | undefined {
   return walk(root);
 }
 
-/**
- * Validate a phone number, returning a normalized error message or null.
- */
-function validatePhone(phone: string): string | null {
+function normalizePhone(phone: string): { normalized?: string; error?: string } {
   if (typeof phone !== 'string' || phone.trim().length === 0) {
-    return 'truemoney: phone is required';
+    return { error: 'truemoney: phone is required' };
   }
-  const normalized = phone.trim().replace(/\s+/g, '');
-  if (!THAI_PHONE_RE.test(normalized)) {
-    return 'truemoney: phone must be a 10-digit Thai mobile number (e.g. 0812345678)';
+  let clean = phone.trim().replace(/[\s\-_().]/g, '');
+  if (clean.startsWith('+66')) {
+    clean = '0' + clean.slice(3);
+  } else if (clean.startsWith('66') && clean.length === 11) {
+    clean = '0' + clean.slice(2);
   }
-  return null;
+  if (!THAI_PHONE_RE.test(clean)) {
+    return { error: 'truemoney: phone must be a 10-digit Thai mobile number (e.g. 0812345678)' };
+  }
+  return { normalized: clean };
 }
 
-/**
- * Redeem a TrueMoney gift code or URL for the given phone number through the
- * zelthrStudio Open API gateway (`POST /tmn`). The gateway talks to the
- * TrueMoney core itself — no voucher data leaves the gateway unencrypted.
- *
- * When options.amount is set, the redeemed amount reported by the API is
- * checked against it and a mismatch throws with slug "amount-mismatch".
- */
 export async function truemoney(
   codeOrLink: string,
   phone: string,
@@ -89,15 +64,23 @@ export async function truemoney(
   if (typeof codeOrLink !== 'string' || codeOrLink.trim().length === 0) {
     throw new ValidationError('truemoney: code or gift URL is required');
   }
-  const phoneError = validatePhone(phone);
-  if (phoneError) throw new ValidationError(phoneError);
+  const { normalized: mobile, error: phoneError } = normalizePhone(phone);
+  if (phoneError || !mobile) {
+    throw new ValidationError(phoneError || 'truemoney: phone is invalid');
+  }
   if (options?.amount != null && (!Number.isFinite(options.amount) || options.amount < 0)) {
     throw new ValidationError('truemoney: amount must be a non-negative number');
   }
-  const res = await post(`${TMN_BASE}/tmn`, {
-    code: codeOrLink.trim(),
-    mobile: phone.trim().replace(/\s+/g, ''),
-  });
+
+  const base = options?.baseUrl || TMN_BASE;
+  const res = await post(
+    `${base}/tmn`,
+    {
+      code: codeOrLink.trim(),
+      mobile,
+    },
+    options
+  );
 
   if (options?.amount != null && res !== null && typeof res === 'object') {
     const redeemed = extractRedeemAmount(res);

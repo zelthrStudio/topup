@@ -7,7 +7,6 @@ function api() {
   return require('../dist/index.js');
 }
 
-// The complete public surface. Any accidental export removal fails here.
 const RUNTIME_EXPORTS = [
   'truemoney',
   'TMN_BASE',

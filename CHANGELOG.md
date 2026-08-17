@@ -1,6 +1,18 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to `@zelthr/topup` will be documented in this file.
+
+## [3.1.0] — 2026-08-18
+
+### Added
+- **Multi-format image input in `bank()`.** Supports `Buffer`, `Uint8Array`, `ArrayBuffer`, and `{ buffer: ArrayBuffer }` directly alongside base64 strings and Data URIs.
+- **Transfer amount verification in `bank()`.** `bank(data, { amount })` validates verified transfer amount from slip response, throwing `AmountMismatchError` if mismatched.
+- **Thai phone normalization in `truemoney()`.** Automatically handles formatted (`081-234-5678`, `(081) 234-5678`), spaced, and international (`+66812345678`, `66812345678`) phone numbers.
+- **Custom request options & headers.** `TruemoneyOptions` and `BankOptions` support `timeoutMs`, `maxBodyBytes`, `baseUrl`, `headers`, and `signal`.
+- **TypeScript interfaces.** Added full typings (`BankOptions`, `SlipOptions`, `SlipImageInput`, `TruemoneyOptions`, `PostOptions`, `TruemoneyResponse`, `BankSlipResponse`).
+
+### Changed
+- Clean code optimization and dead code cleanup across the entire package.
 
 ## [3.0.0] — 2026-08-17
 

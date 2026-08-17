@@ -29,7 +29,6 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.url === '/tmn' && parsed && parsed.code === 'redeem-fee-first') {
-      // Nested fee breakdown iterated BEFORE the real top-level amount.
       res.end(JSON.stringify({ fee: { amount: 50 }, amount: 100 }));
       return;
     }
@@ -41,6 +40,10 @@ const server = http.createServer((req, res) => {
     }
     if (req.url === '/slip' && parsed && parsed.img === 'data:image/jpeg;base64,TEST') {
       res.end(JSON.stringify({ success: true, amount: 80 }));
+      return;
+    }
+    if (req.url === '/slip' && parsed && parsed.img === 'data:image/jpeg;base64,NOAMOUNT') {
+      res.end(JSON.stringify({ success: true, data: {} }));
       return;
     }
     const statusMatch = req.url.match(/^\/status\/(\d+)/);
@@ -60,11 +63,11 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.url === '/hang' || req.url.includes('hang-secret')) {
-      return; // never respond — for timeout tests the client aborts
+      return;
     }
     if (req.url === '/big-error') {
       res.statusCode = 500;
-      res.end('X'.repeat(70000)); // oversized error body (>64KB cap)
+      res.end('X'.repeat(70000));
       return;
     }
     if (req.url === '/raw200') {
@@ -75,7 +78,7 @@ const server = http.createServer((req, res) => {
       res.end();
       return;
     }
-    res.end(JSON.stringify({ method: req.method, url: req.url, body: parsed }));
+    res.end(JSON.stringify({ method: req.method, url: req.url, body: parsed, headers: req.headers }));
   });
 });
 
@@ -93,8 +96,6 @@ function api() {
   return require('../dist/index.js');
 }
 
-// --- Gateway client: truemoney() → POST /tmn ---
-
 test('truemoney posts {code, mobile} to /tmn', async () => {
   const res = await api().truemoney('ABCD1234EFGH', '0812345678');
   assert.equal(res.method, 'POST');
@@ -109,9 +110,26 @@ test('truemoney sends the raw gift link as-is (no path encoding — JSON body)',
   assert.equal(res.body.code, link);
 });
 
-test('truemoney normalizes spaced phone numbers', async () => {
-  const res = await api().truemoney('ABCD1234', ' 081 234 5678 ');
-  assert.equal(res.body.mobile, '0812345678');
+test('truemoney normalizes spaced, hyphenated, and parenthesized phone numbers', async () => {
+  const res1 = await api().truemoney('ABCD1234', ' 081 234 5678 ');
+  assert.equal(res1.body.mobile, '0812345678');
+
+  const res2 = await api().truemoney('ABCD1234', '081-234-5678');
+  assert.equal(res2.body.mobile, '0812345678');
+
+  const res3 = await api().truemoney('ABCD1234', '(081) 234-5678');
+  assert.equal(res3.body.mobile, '0812345678');
+});
+
+test('truemoney normalizes international +66 and 66 phone numbers', async () => {
+  const res1 = await api().truemoney('ABCD1234', '+66812345678');
+  assert.equal(res1.body.mobile, '0812345678');
+
+  const res2 = await api().truemoney('ABCD1234', '+66 81-234-5678');
+  assert.equal(res2.body.mobile, '0812345678');
+
+  const res3 = await api().truemoney('ABCD1234', '66812345678');
+  assert.equal(res3.body.mobile, '0812345678');
 });
 
 test('truemoney amount check passes when the redeemed amount matches', async () => {
@@ -152,6 +170,7 @@ test('truemoney rejects an invalid phone number', async () => {
   await assert.rejects(() => api().truemoney('ABCD1234', 'hello'), /10-digit Thai mobile number/);
   await assert.rejects(() => api().truemoney('ABCD1234', '081234567'), /10-digit Thai mobile number/);
   await assert.rejects(() => api().truemoney('ABCD1234', '1812345678'), /10-digit Thai mobile number/);
+  await assert.rejects(() => api().truemoney('ABCD1234', '+6612345678'), /10-digit Thai mobile number/);
 });
 
 test('truemoney rejects an invalid expected amount', async () => {
@@ -166,7 +185,14 @@ test('truemoney surfaces gateway errors with status and body', async () => {
   );
 });
 
-// --- Gateway client: bank() → POST /slip ---
+test('truemoney supports custom baseUrl and headers option', async () => {
+  const customBase = `http://127.0.0.1:${server.address().port}`;
+  const res = await api().truemoney('ABCD1234', '0812345678', {
+    baseUrl: customBase,
+    headers: { 'x-client-ver': '3.0.0' },
+  });
+  assert.equal(res.headers['x-client-ver'], '3.0.0');
+});
 
 test('bank posts the image as {img} data URI to /slip', async () => {
   const img = 'data:image/jpeg;base64,AAAA';
@@ -174,7 +200,7 @@ test('bank posts the image as {img} data URI to /slip', async () => {
   assert.equal(res.method, 'POST');
   assert.equal(res.url, '/slip');
   assert.equal(res.body.img, img);
-  assert.equal(res.body.tos, undefined, 'no consent flags — the gateway handles the pipeline');
+  assert.equal(res.body.tos, undefined);
 });
 
 test('bank wraps bare base64 as a jpeg data URI', async () => {
@@ -182,22 +208,69 @@ test('bank wraps bare base64 as a jpeg data URI', async () => {
   assert.equal(res.body.img, 'data:image/jpeg;base64,AAAA');
 });
 
+test('bank strips whitespaces and newlines from base64 strings', async () => {
+  const multiline = 'AA AA\nBB\r\nCC';
+  const res = await api().bank(multiline);
+  assert.equal(res.body.img, 'data:image/jpeg;base64,AAAABBCC');
+});
+
+test('bank accepts Buffer input and converts to data URI', async () => {
+  const buf = Buffer.from('TEST_IMAGE_BUFFER');
+  const res = await api().bank(buf);
+  assert.equal(res.body.img, `data:image/jpeg;base64,${buf.toString('base64')}`);
+});
+
+test('bank accepts Uint8Array input and converts to data URI', async () => {
+  const u8 = new Uint8Array([72, 101, 108, 108, 111]);
+  const res = await api().bank(u8);
+  assert.equal(res.body.img, `data:image/jpeg;base64,${Buffer.from(u8).toString('base64')}`);
+});
+
+test('bank accepts ArrayBuffer input and converts to data URI', async () => {
+  const ab = new Uint8Array([65, 66, 67]).buffer;
+  const res = await api().bank(ab);
+  assert.equal(res.body.img, `data:image/jpeg;base64,${Buffer.from(ab).toString('base64')}`);
+});
+
 test('bank returns the gateway verified-slip result as-is', async () => {
   const res = await api().bank('data:image/jpeg;base64,TEST');
   assert.deepEqual(res, { success: true, amount: 80 });
 });
 
-test('bank rejects empty input', async () => {
+test('bank amount check passes when slip amount matches', async () => {
+  const res = await api().bank('data:image/jpeg;base64,TEST', { amount: 80 });
+  assert.deepEqual(res, { success: true, amount: 80 });
+});
+
+test('bank amount check throws AmountMismatchError on mismatch', async () => {
+  await assert.rejects(
+    () => api().bank('data:image/jpeg;base64,TEST', { amount: 100 }),
+    (err) => err instanceof api().AmountMismatchError && /expected 100 THB but slip verified 80 THB/.test(err.message)
+  );
+});
+
+test('bank amount check throws AmountVerificationError when no amount extracted', async () => {
+  await assert.rejects(
+    () => api().bank('data:image/jpeg;base64,NOAMOUNT', { amount: 80 }),
+    (err) => err instanceof api().AmountVerificationError && err.slug === 'amount-unverifiable'
+  );
+});
+
+test('bank rejects invalid expected amount', async () => {
+  await assert.rejects(() => api().bank('data:image/jpeg;base64,TEST', { amount: -1 }), /non-negative number/);
+  await assert.rejects(() => api().bank('data:image/jpeg;base64,TEST', { amount: NaN }), /non-negative number/);
+});
+
+test('bank rejects empty or invalid input', async () => {
   await assert.rejects(() => api().bank(''), /slip image.*is required/);
   await assert.rejects(() => api().bank('   '), /slip image.*is required/);
+  await assert.rejects(() => api().bank(12345), /must be a base64 string, data URI, or binary Buffer/);
 });
 
 test('bank rejects base64 strings over the character cap', async () => {
   const big = 'data:image/jpeg;base64,' + 'A'.repeat(41 * 1024 * 1024);
   await assert.rejects(() => api().bank(big), /exceeds .* base64/);
 });
-
-// --- Shared HTTP behavior ---
 
 test('clients never follow redirects (bodies are not re-POSTed)', async () => {
   const err = await api()
@@ -206,8 +279,6 @@ test('clients never follow redirects (bodies are not re-POSTed)', async () => {
   assert.ok(err instanceof api().HttpError);
   assert.equal(err.status, 307);
   assert.match(err.message, /HTTP 307/);
-  // The gift code and phone live in the JSON body — error messages must never
-  // expose either.
   assert.doesNotMatch(err.message, /REDIRECT/);
   assert.doesNotMatch(err.message, /0812345678/);
 });
@@ -264,8 +335,8 @@ test('oversized error bodies are capped to a 64KB preview', async () => {
   assert.ok(err instanceof api().HttpError);
   assert.equal(err.status, 500);
   assert.equal(err.message, 'HTTP 500');
-  assert.equal(err.body, undefined, 'full body must not be retained');
-  assert.equal(err.bodyPreview.length, 65536, 'preview is capped at 64KB');
+  assert.equal(err.body, undefined);
+  assert.equal(err.bodyPreview.length, 65536);
 });
 
 test('non-JSON 2xx responses fail loudly (no silent raw-text pass-through)', async () => {
@@ -293,10 +364,8 @@ test('a request that never responds throws TimeoutError', async () => {
   assert.ok(err instanceof api().TimeoutError);
   assert.ok(err instanceof api().TopupError);
   assert.match(err.message, /timed out/);
-  assert.ok(Date.now() - started < 5000, 'timeout should fire quickly, not wait 30s');
+  assert.ok(Date.now() - started < 5000);
 });
-
-// --- Error hierarchy ---
 
 test('error classes form a catchable hierarchy', () => {
   const { ValidationError, TopupError, HttpError, AmountMismatchError, AmountVerificationError, TimeoutError } = api();

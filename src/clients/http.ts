@@ -1,17 +1,12 @@
 import { dynamicImport } from '../util/dynamic-import';
 import { HttpError, TimeoutError } from '../errors';
-import type { TopupApiResponse } from '../types';
+import type { PostOptions, TopupApiResponse } from '../types';
+
+export type { PostOptions };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
-
-/** Server-controlled text is capped before it reaches error messages, which
- *  consumers often log. */
 const MAX_ERROR_MESSAGE_CHARS = 2000;
-
-/** Error bodies are attached to thrown errors for diagnostics; retain at most
- *  64 KB so a hostile/verbose server can't bloat error objects (and skip
- *  JSON.parse of multi-MB payloads entirely). */
 const MAX_ERROR_BODY_CHARS = 64 * 1024;
 
 function capText(text: string): string {
@@ -20,9 +15,6 @@ function capText(text: string): string {
     : text;
 }
 
-/** Request URLs carry secrets in the path (truemoney gift codes and phone
- *  numbers). Error messages are routinely logged / shipped to error trackers,
- *  so keep only the origin and the first path segment. */
 function redactUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -33,16 +25,16 @@ function redactUrl(url: string): string {
   }
 }
 
-export interface PostOptions {
-  /** Request deadline in ms. @default 30000 */
-  timeoutMs?: number;
-  /** Response body cap in bytes. @default 33554432 (32 MiB) */
-  maxBodyBytes?: number;
+function coerceBodyToString(raw: unknown): string | null {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') {
+    if (typeof (raw as Buffer).toString === 'function' && (Buffer.isBuffer(raw) || raw instanceof Uint8Array)) {
+      return (raw as Buffer).toString('utf8');
+    }
+  }
+  return null;
 }
 
-// @zelthr/request is a Node HTTP client (http1/http2/fetch transports). It is
-// loaded lazily on first request so that importing this package never touches
-// Node-only code in browser bundles.
 interface RequestModule {
   promise(
     url: string,
@@ -64,75 +56,76 @@ function getRequest(): Promise<RequestModule> {
   return requestPromise;
 }
 
-/**
- * Shared POST helper used by the truemoney and slip clients.
- *
- * Every outbound request goes through `@zelthr/request` with explicit
- * options: JSON-serialized body (when one is given), deadline, response
- * body budget, redirects disabled and gzip support.
- */
-export async function post(url: string, body?: unknown, options?: PostOptions): Promise<TopupApiResponse | string> {
+export async function post(
+  url: string,
+  body?: unknown,
+  options?: PostOptions
+): Promise<TopupApiResponse | string> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBodyBytes = options?.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
 
   const request = await getRequest();
   let response: { statusCode: number; body: unknown };
   try {
+    const headers: Record<string, string> = {
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : undefined),
+      ...options?.headers,
+    };
+
     response = await request.promise(url, {
       method: 'POST',
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       timeout: timeoutMs,
       maxBytes: maxBodyBytes,
-      // Never follow redirects: the library already refuses to follow 3xx
-      // for POST, but keep the guard explicit so a 307/308 can never re-POST
-      // the slip image / gift code to a redirected host.
+      signal: options?.signal,
       followRedirect: false,
-      // Preserve fetch semantics: advertise and decode gzip responses.
       gzip: true,
-      // Explicitly disable proxy auto-detection (HTTP_PROXY/HTTPS_PROXY env
-      // vars): gift codes, phone numbers, slip images and tokens must never
-      // be routed through an ambient proxy that the operator did not
-      // deliberately configure for this client.
       proxy: null,
     });
   } catch (err) {
-    // The library rejects with ETIMEDOUT / ESOCKETTIMEDOUT on deadline
-    // expiry and with EBODYLIMIT once the response body exceeds maxBytes.
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || code === 'ECONNABORTED') {
+    const errObj = err as NodeJS.ErrnoException & { name?: string };
+    const code = errObj.code;
+    const name = errObj.name;
+    if (
+      code === 'ETIMEDOUT' ||
+      code === 'ESOCKETTIMEDOUT' ||
+      code === 'ECONNABORTED' ||
+      code === 'ERR_REQUEST_TIMED_OUT' ||
+      code === 'ABORT_ERR' ||
+      name === 'AbortError' ||
+      name === 'TimeoutError'
+    ) {
       throw new TimeoutError(`topup: request timed out after ${timeoutMs} ms: ${redactUrl(url)}`, { cause: err });
     }
     if (code === 'EBODYLIMIT') {
       throw new HttpError(`topup: response body exceeds ${maxBodyBytes} bytes: ${redactUrl(url)}`, { cause: err });
     }
-    throw new HttpError(`topup: request failed (${(err as Error).name}): ${redactUrl(url)}`, { cause: err });
+    throw new HttpError(`topup: request failed (${(err as Error).name || 'NetworkError'}): ${redactUrl(url)}`, { cause: err });
   }
 
   const status = response.statusCode;
   const rawBody = response.body;
 
   if (status < 200 || status >= 300) {
-    if (typeof rawBody === 'string' && rawBody.length > MAX_ERROR_BODY_CHARS) {
-      // Non-2xx with an oversized body: don't retain the full payload, and
-      // don't pay for a JSON.parse of multi-MB error bodies. Keep a preview
-      // for diagnostics.
+    const stringBody = coerceBodyToString(rawBody);
+    if (typeof stringBody === 'string' && stringBody.length > MAX_ERROR_BODY_CHARS) {
       throw new HttpError(`HTTP ${status}`, {
         status,
-        bodyPreview: rawBody.slice(0, MAX_ERROR_BODY_CHARS),
+        bodyPreview: stringBody.slice(0, MAX_ERROR_BODY_CHARS),
       });
     }
-    let payload: unknown = rawBody;
+
+    let payload: unknown = stringBody ?? rawBody;
     if (typeof payload === 'string') {
       try {
         payload = JSON.parse(payload);
       } catch {
-        // Not JSON — keep the raw response body.
       }
     }
     if (typeof payload === 'object' && payload !== null) {
       const record = payload as Record<string, unknown>;
-      throw new HttpError(capText(String(record.slug || record.message || `HTTP ${status}`)), {
+      throw new HttpError(capText(String(record.slug || record.message || record.error || `HTTP ${status}`)), {
         status,
         slug: typeof record.slug === 'string' ? capText(record.slug) : undefined,
         body: payload,
@@ -141,21 +134,16 @@ export async function post(url: string, body?: unknown, options?: PostOptions): 
     throw new HttpError(`HTTP ${status}: ${capText(String(payload))}`, { status, body: payload });
   }
 
-  let payload: TopupApiResponse | string = rawBody as TopupApiResponse | string;
+  const stringBody = coerceBodyToString(rawBody);
+  let payload: TopupApiResponse | string = (stringBody ?? rawBody) as TopupApiResponse | string;
   if (typeof payload === 'string') {
     const trimmed = payload.trim();
     if (trimmed.length === 0) {
-      // Some endpoints return 200 with no body on success; treat it as an
-      // empty JSON object so callers never see a raw empty string.
       payload = {} as TopupApiResponse;
     } else {
       try {
         payload = JSON.parse(trimmed) as TopupApiResponse | string;
       } catch {
-        // A 2xx with a non-JSON body is an anomaly (WAF challenge page,
-        // HTML error, proxy interstitial): the exchange did not succeed in
-        // the expected protocol. Fail loudly instead of returning a raw
-        // string that silently skips amount verification.
         throw new HttpError(`topup: HTTP ${status} response body is not JSON`, {
           status,
           body: trimmed.slice(0, MAX_ERROR_BODY_CHARS),
