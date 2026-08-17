@@ -2,6 +2,19 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [Unreleased]
+
+### Changed (breaking)
+- **API-only package.** Everything not backed by the zelthrStudio Open API
+  gateway is gone: the local QR parsers (`parseEmvco`, `parseSlipCheck`),
+  CRC utilities (`verifyCrc`, `crc16ccitt`), the PromptPay generator
+  (`getQrCodePromptPay`, `MAX_PROMPTPAY_AMOUNT`) and the `QrParseError` /
+  `CrcValidationError` classes were removed. `truemoney()` (`POST /tmn`) and
+  `bank()` (`POST /slip`) are the entire surface — every call goes through
+  the gateway, exactly as documented at <https://zelthr.rest/docs>.
+- **Dependency pruned.** `@zelthr/qrcode` removed; only `@zelthr/request`
+  remains.
+
 ## [2.0.0] — 2026-08-17
 
 ### Changed (breaking)

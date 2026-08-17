@@ -16,18 +16,10 @@ const RUNTIME_EXPORTS = [
   'post',
   'TopupError',
   'ValidationError',
-  'QrParseError',
-  'CrcValidationError',
   'TimeoutError',
   'HttpError',
   'AmountMismatchError',
   'AmountVerificationError',
-  'parseEmvco',
-  'parseSlipCheck',
-  'verifyCrc',
-  'crc16ccitt',
-  'getQrCodePromptPay',
-  'MAX_PROMPTPAY_AMOUNT',
 ];
 
 test('all public runtime exports are present', () => {
@@ -39,7 +31,7 @@ test('all public runtime exports are present', () => {
 
 test('all public functions are callable', () => {
   const mod = api();
-  const callables = RUNTIME_EXPORTS.filter((n) => !n.endsWith('_BASE') && n !== 'MAX_PROMPTPAY_AMOUNT');
+  const callables = RUNTIME_EXPORTS.filter((n) => !n.endsWith('_BASE'));
   for (const name of callables) {
     assert.equal(typeof mod[name], 'function', `${name} should be a function`);
   }
@@ -63,8 +55,6 @@ test('every error class reports the right name, message, and hierarchy', () => {
   const m = api();
   const cases = [
     ['ValidationError', 'TopupError'],
-    ['QrParseError', 'TopupError'],
-    ['CrcValidationError', 'TopupError'],
     ['TimeoutError', 'TopupError'],
     ['HttpError', 'TopupError'],
     ['AmountMismatchError', 'HttpError'],

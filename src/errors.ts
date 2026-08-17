@@ -13,22 +13,6 @@ export class ValidationError extends TopupError {
   }
 }
 
-/** A QR payload could not be parsed. */
-export class QrParseError extends TopupError {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'QrParseError';
-  }
-}
-
-/** A QR payload failed CRC / structural verification. */
-export class CrcValidationError extends TopupError {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'CrcValidationError';
-  }
-}
-
 /** An outbound HTTP request exceeded its deadline. */
 export class TimeoutError extends TopupError {
   constructor(message: string, options?: { cause?: unknown }) {

@@ -19,30 +19,10 @@ const EXPORTS = [
   // errors
   'TopupError',
   'ValidationError',
-  'QrParseError',
-  'CrcValidationError',
-  'OcrError',
-  'OcrTimeoutError',
   'TimeoutError',
   'HttpError',
   'AmountMismatchError',
   'AmountVerificationError',
-  // local OCR
-  'getSlipAmount',
-  'CROP_PROFILES',
-  'extractAmounts',
-  'isLikelyAmount',
-  'terminateAmountExtractor',
-  'warmupAmountExtractor',
-  // QR
-  'decodeQr',
-  'parseEmvco',
-  'parseSlipCheck',
-  'verifyCrc',
-  'crc16ccitt',
-  // PromptPay
-  'getQrCodePromptPay',
-  'MAX_PROMPTPAY_AMOUNT',
 ];
 
 const lines = [

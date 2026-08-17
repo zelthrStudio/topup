@@ -32,9 +32,6 @@
     "thailand",
     "slip",
     "slip-verify",
-    "promptpay",
-    "emvco",
-    "qr",
     "bank-transfer",
     "verification",
     "api"
@@ -49,7 +46,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@zelthr/qrcode": "^0.1.4",
     "@zelthr/request": "^1.5.0"
   },
   "devDependencies": {

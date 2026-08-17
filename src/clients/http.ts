@@ -1,8 +1,6 @@
 import { dynamicImport } from '../util/dynamic-import';
-import { HttpError, TimeoutError, type TopupApiError } from '../errors';
+import { HttpError, TimeoutError } from '../errors';
 import type { TopupApiResponse } from '../types';
-
-export type { TopupApiError, TopupApiResponse } from '../types';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -43,8 +41,8 @@ export interface PostOptions {
 }
 
 // @zelthr/request is a Node HTTP client (http1/http2/fetch transports). It is
-// loaded lazily on first request so that importing this package (e.g. in a
-// browser bundle for getQrCodePromptPay) never touches Node-only code.
+// loaded lazily on first request so that importing this package never touches
+// Node-only code in browser bundles.
 interface RequestModule {
   promise(
     url: string,
@@ -70,8 +68,8 @@ function getRequest(): Promise<RequestModule> {
  * Shared POST helper used by the truemoney and slip clients.
  *
  * Every outbound request goes through `@zelthr/request` with explicit
- * options: POST method, JSON-serialized body (when one is given), deadline,
- * response body budget, redirects disabled and gzip support.
+ * options: JSON-serialized body (when one is given), deadline, response
+ * body budget, redirects disabled and gzip support.
  */
 export async function post(url: string, body?: unknown, options?: PostOptions): Promise<TopupApiResponse | string> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;

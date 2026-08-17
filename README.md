@@ -1,10 +1,15 @@
 ﻿# @zelthr/topup
 
-TrueMoney gift-code redemption and Thai bank-slip verification for Node.js — through the [zelthrStudio Open API gateway](https://zelthr.rest/docs) (`https://api.zelthr.rest`).
+A thin, dependency-light Node.js client for the [zelthrStudio Open API gateway](https://zelthr.rest/docs) — TrueMoney gift-code redemption and Thai bank-slip verification, served from `https://api.zelthr.rest`.
 
-- **TrueMoney redemption** — `truemoney()` posts to `POST /tmn` and redeems a gift code / gift URL to any 10-digit Thai mobile number, with an optional expected-amount check.
-- **Slip verification** — `bank()` posts your slip image to `POST /slip`; the gateway runs the full OCR pipeline (QR decode, amount extraction, upstream verification) so **this package performs no local scanning and has no native dependencies**.
-- **Pure QR utilities** — PromptPay EMVCo and Thai bank slip-check (Mini-QR) parsing with CRC-16 verification (strict mode), plus `getQrCodePromptPay` for generating PromptPay QR payloads (PNG/SVG).
+The package does **no local work**: every call is forwarded to the gateway, which talks to the TrueMoney core and runs the full slip OCR pipeline itself. No image scanning, no QR parsing, no native binaries — just two clean API calls.
+
+## Endpoints
+
+| Function | Gateway route | Purpose |
+| --- | --- | --- |
+| `truemoney(code, phone, options?)` | `POST /tmn` | Check / redeem a TrueMoney voucher code |
+| `bank(data)` | `POST /slip` | Verify a Thai bank transfer slip from an image |
 
 ## Requirements
 
@@ -16,80 +21,107 @@ TrueMoney gift-code redemption and Thai bank-slip verification for Node.js — t
 npm install @zelthr/topup
 ```
 
-No install scripts, no native binaries, no model files — the tarball is tiny and installs on any platform.
+No install scripts, no native binaries, no model files — installs on any platform in seconds.
 
 ## Quick Start
 
+### TrueMoney voucher redemption
+
 ```js
-const { truemoney, bank } = require('@zelthr/topup');
+const { truemoney } = require('@zelthr/topup');
 
-// 1. Redeem a TrueMoney gift code (gateway talks to the TrueMoney core)
+// Redeem a gift code to a 10-digit Thai mobile number
 const res = await truemoney('ABCD1234EFGH', '0812345678');
-// With expected amount (throws AmountMismatchError on mismatch):
-const res2 = await truemoney('https://gift.truemoney.com/campaign/?v=XXXX', '0812345678', { amount: 100 });
 
-// 2. Verify a bank slip (the gateway scans the image for you)
-const slip = await bank(fs.readFileSync('slip.jpg').toString('base64'));
+// Gift URLs work too, and you can verify the redeemed amount
+const res2 = await truemoney('https://gift.truemoney.com/campaign/?v=XXXX', '0812345678', { amount: 100 });
+// throws AmountMismatchError if the code redeemed a different amount
 ```
+
+### Bank slip verification
+
+```js
+const { bank } = require('@zelthr/topup');
+const fs = require('node:fs');
+
+const img = 'data:image/jpeg;base64,' + fs.readFileSync('slip.jpg').toString('base64');
+const res = await bank(img);
+// { success: true, amount: 80, ... } — the verified slip result
+```
+
+Bare base64 strings are wrapped as `data:image/jpeg;base64,...` automatically.
 
 ## API
 
 ### `truemoney(codeOrLink, phone, options?)`
 
-Redeems a TrueMoney gift code via the gateway (`POST /tmn`).
+Redeems a TrueMoney voucher via `POST /tmn`.
 
 | arg | type | description |
 | --- | --- | --- |
-| `codeOrLink` | `string` | Gift code (`ABCD1234EFGH`) or full gift URL. |
-| `phone` | `string` | 10-digit Thai mobile number (`08x...`). Whitespace is normalized. |
-| `options.amount` | `number` | Optional. If set, the redeemed amount is compared and a mismatch throws `AmountMismatchError` (`slug === 'amount-mismatch'`). |
+| `codeOrLink` | `string` | Gift code (e.g. `ABCD1234EFGH`) or full gift URL. |
+| `phone` | `string` | 10-digit Thai mobile number (`08x...`); whitespace is normalized. |
+| `options.amount` | `number` | Optional. If set, the redeemed amount is compared against it and a mismatch throws `AmountMismatchError` (`slug === 'amount-mismatch'`). |
 
-Returns the parsed gateway JSON response (the upstream redeem result as-is).
+Under the hood:
+
+```
+POST https://api.zelthr.rest/tmn
+{ "code": "ABCD1234EFGH", "mobile": "0812345678" }
+```
+
+Returns the gateway JSON response (the upstream redeem result as-is). A non-existent voucher is a normal `200` with `status.code === 'VOUCHER_NOT_FOUND'` — HTTP 4xx/5xx means the request itself was rejected or the upstream failed.
 
 ### `bank(data)`
 
-Verifies a Thai bank transfer slip via the gateway (`POST /slip`). No local scanning happens — the gateway decodes the QR, extracts the amount and verifies it upstream.
+Verifies a Thai bank transfer slip via `POST /slip`. The gateway decodes the QR, extracts the amount and verifies it upstream.
 
 | arg | type | description |
 | --- | --- | --- |
-| `data` | `string` | Slip image as a base64 string or a full `data:` URI (e.g. `data:image/jpeg;base64,...`). Bare base64 is wrapped as a JPEG data URI. |
+| `data` | `string` | Slip image as a base64 string or a full `data:` URI (e.g. `data:image/jpeg;base64,...`). |
 
-Returns the upstream verified-slip result as-is. Throws `ValidationError` on empty input or oversized payloads, and `HttpError` (with `.status`, `.slug`, `.body`) on gateway failures (e.g. `400 invalid-image`, `429` rate limit, `5xx`).
+Under the hood:
 
-### `parseEmvco(payload, options?)` / `parseSlipCheck(payload, options?)`
+```
+POST https://api.zelthr.rest/slip
+{ "img": "data:image/jpeg;base64,/9j/4AAQ..." }
+```
 
-Parse a QR payload string. Pass `{ strict: true }` to throw `QrParseError` on malformed/duplicate/truncated TLV structure and `CrcValidationError` on a CRC mismatch. Lenient (default) tolerates malformed tails.
-
-### `getQrCodePromptPay(target, options?)`
-
-Generates a PromptPay QR payload (+ PNG/SVG) for a mobile number, national ID or e-wallet ID. `MAX_PROMPTPAY_AMOUNT` is the BOT 200,000 Baht limit.
+Returns the upstream verified-slip result as-is. Throws `ValidationError` on empty input or oversized payloads, and `HttpError` on gateway failures (e.g. `400 invalid-image`, `429` rate limit, `503` OCR pipeline busy).
 
 ### Low-level helpers
 
-- `verifyCrc(payload, tag)` / `crc16ccitt(input)` — CRC-16/CCITT-FALSE verification.
-- `post(url, body?, options?)` — the shared POST helper (deadline, body cap, redirects disabled).
-- `TMN_BASE` / `SLIP_BASE` — base URL constants (override with env vars, below).
+- `post(url, body?, options?)` — shared POST helper used by both clients (JSON body, 30 s deadline, 32 MiB body cap, redirects disabled).
+- `TMN_BASE` / `SLIP_BASE` — gateway base URL constants (`https://api.zelthr.rest`), overridable via env vars below.
 
 ## Error handling
 
 All errors extend a common base and are exported:
 
-- `TopupError` — base class (`instanceof` for broad catches).
-- `ValidationError` — invalid caller input.
-- `QrParseError` — QR payload could not be parsed.
-- `CrcValidationError` — CRC/structural verification failed.
-- `HttpError` — non-2xx or transport failure, with `.status`, `.slug`, `.body`.
-- `TimeoutError` — request exceeded its deadline (30 s default).
-- `AmountMismatchError` — extends `HttpError`, `slug === 'amount-mismatch'`.
-- `AmountVerificationError` — extends `HttpError`, `slug === 'amount-unverifiable'`.
+| Error | Meaning |
+| --- | --- |
+| `TopupError` | Base class — catch this for broad handling. |
+| `ValidationError` | Invalid caller input (empty code, bad phone, ...). |
+| `TimeoutError` | Request exceeded its deadline (30 s default). |
+| `HttpError` | Non-2xx or transport failure, with `.status`, `.slug`, `.body`. |
+| `AmountMismatchError` | Extends `HttpError`; the code redeemed a different amount than expected (`slug === 'amount-mismatch'`). |
+| `AmountVerificationError` | Extends `HttpError`; amount verification was requested but no amount could be extracted from the response. |
 
 ```js
+const { truemoney, AmountMismatchError } = require('@zelthr/topup');
+
 try {
   await truemoney(code, phone, { amount: 100 });
 } catch (err) {
-  if (err instanceof require('@zelthr/topup').AmountMismatchError) { /* ... */ }
+  if (err instanceof AmountMismatchError) {
+    console.error(`redeemed ${err.body ? JSON.stringify(err.body) : '?'} instead of 100 THB`);
+  }
 }
 ```
+
+## Rate limits
+
+The gateway enforces per-IP limits — tmn: 60/min, slip: 20/min — and returns `429` with `Retry-After` when exceeded, surfaced as an `HttpError` with `slug === 'rate-limited'`.
 
 ## Environment variables
 
@@ -100,11 +132,8 @@ try {
 
 ## Security
 
-- Gift codes, phone numbers, slip images and tokens are sent in the JSON body / TLS only — never through a redirect (redirects are disabled) and never through ambient proxies (`proxy: null`).
+- Gift codes, phone numbers and slip images travel in the JSON body over TLS only — redirects are disabled and ambient proxies (`HTTP_PROXY`/`HTTPS_PROXY`) are explicitly ignored, so a 307/308 can never re-POST your data to another host.
 - Error messages redact the request URL and cap server-controlled text; oversized error bodies are truncated to a 64 KB preview.
-- The gateway enforces per-IP rate limits (tmn: 60/min, slip: 20/min) and returns `429` with `Retry-After` when exceeded.
-
-See [`SECURITY-AUDIT.md`](SECURITY-AUDIT.md) for the full assessment.
 
 ## License
 

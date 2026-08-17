@@ -4,9 +4,6 @@ import {
   bank,
   truemoney,
   post,
-  parseEmvco,
-  verifyCrc,
-  crc16ccitt,
   HttpError,
   TopupError,
   AmountMismatchError,
@@ -19,21 +16,16 @@ const require = createRequire(import.meta.url);
 // resolve, the ESM interop is solid.
 assert.equal(typeof bank, 'function');
 assert.equal(typeof truemoney, 'function');
-assert.equal(typeof parseEmvco, 'function');
-assert.equal(typeof verifyCrc, 'function');
+assert.equal(typeof post, 'function');
 
 // Error classes via named import.
 assert.ok(new HttpError('x') instanceof TopupError);
 assert.ok(new AmountMismatchError('x') instanceof HttpError);
 
-// Pure QR path works identically from ESM.
-const body = '00020101021229370016A000000677010111011300668123456785303764540580.005802TH';
-const payload = `${body}6304${crc16ccitt(`${body}6304`)}`;
-assert.equal(parseEmvco(payload).crcValid, true);
-
 // Both entry styles must see the SAME module instance (no dual-package hazard).
 const cjs = require('@zelthr/topup');
-assert.strictEqual(cjs.parseEmvco, parseEmvco, 'ESM and CJS must share the same instance');
+assert.strictEqual(cjs.truemoney, truemoney, 'ESM and CJS must share the same instance');
+assert.strictEqual(cjs.HttpError, HttpError, 'ESM and CJS must share the same instance');
 
 // Live gateway round-trip from ESM: a fake voucher returns the upstream
 // business response (200 + status.code); a malformed request surfaces the

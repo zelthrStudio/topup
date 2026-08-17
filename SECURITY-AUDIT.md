@@ -5,9 +5,9 @@
 
 ## Result
 
-`npm audit --omit=dev` → **0 findings**. The dependency tree is just two small
-pure-JS packages (`@zelthr/request`, `@zelthr/qrcode`) — no native binaries,
-no install scripts, no OCR engines, no model files.
+`npm audit --omit=dev` → **0 findings**. The dependency tree is one small
+pure-JS package (`@zelthr/request`) — no native binaries, no install scripts,
+no OCR engines, no model files.
 
 ## What changed since 1.x
 
@@ -40,11 +40,10 @@ runs the OCR pipeline server-side. Those findings no longer apply.
 
 - No process-exit concerns: no worker pools, no native handles. The package can
   be imported and dropped from memory at any time.
-- QR payload parsing (`parseEmvco` / `parseSlipCheck`) is pure string TLV
-  parsing with a nesting-depth cap and strict-mode CRC verification — no image
-  decoding, no WASM.
+- No QR/image parsing ships in this package at all — all decoding and OCR
+  happens inside the gateway.
 
 ## Revisit
 
 - [ ] Re-check `npm audit` before each release (expected to stay at 0 findings
-      while the tree stays at these two pure-JS dependencies).
+      while the tree stays at this single pure-JS dependency).
