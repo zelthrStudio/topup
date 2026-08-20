@@ -1,4 +1,4 @@
-﻿# Security Audit — @zelthr/topup
+# Security Audit — @zelthr/topup
 
 **Date:** 2026-08-17
 **Scope:** `@zelthr/topup@2.0.0` — gateway-client release (no local scanning).
@@ -33,7 +33,7 @@ runs the OCR pipeline server-side. Those findings no longer apply.
 - **No local parsing of untrusted images** — image bytes are forwarded to the
   gateway, so a crafted image can never reach a decoder in the consumer's
   process.
-- The gateway enforces per-IP rate limits (tmn: 60/min, slip: 20/min) and
+- The gateway enforces per-IP rate limits (tmn: 200/min, slip: 100/min) and
   rejects with `429` + `Retry-After` when exceeded.
 
 ## Non-security notes

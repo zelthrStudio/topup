@@ -86,7 +86,7 @@ export async function bank(
   }
 
   const base = options?.baseUrl || SLIP_BASE;
-  const res = await post(`${base}/slip`, { img: image }, options);
+  const res = await post(base.replace(/\/+$/, '') + '/', { img: image }, options);
 
   if (options?.amount != null && res !== null && typeof res === 'object') {
     const extracted = extractBankAmount(res);

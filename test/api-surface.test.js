@@ -66,9 +66,9 @@ test('every error class reports the right name, message, and hierarchy', () => {
     assert.ok(err instanceof m.TopupError);
     assert.ok(err instanceof Error);
   }
-  const http = new m.HttpError('x', { status: 429, slug: 'rate-limited', body: { a: 1 } });
+  const http = new m.HttpError('x', { status: 429, slug: 'rate-limit-exceeded', body: { a: 1 } });
   assert.equal(http.status, 429);
-  assert.equal(http.slug, 'rate-limited');
+  assert.equal(http.slug, 'rate-limit-exceeded');
   assert.deepEqual(http.body, { a: 1 });
   assert.equal(new m.AmountMismatchError('x').slug, 'amount-mismatch');
 });

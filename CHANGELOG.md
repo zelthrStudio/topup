@@ -2,6 +2,29 @@
 
 All notable changes to `@zelthr/topup` will be documented in this file.
 
+## [3.1.1] — 2026-08-20
+
+### Changed (breaking)
+- **Unified endpoint.** Both `truemoney()` and `bank()` now post to the
+  gateway's single unified verification endpoint `POST /` instead of the
+  removed `/tmn` and `/slip` routes (which now return 404). The gateway
+  auto-detects the service from the request body, exactly as documented at
+  <https://zelthr.rest/docs/verify>.
+- **TrueMoney body fields renamed** to the documented names: `{ gift, phone }`
+  (previously `{ code, mobile }`).
+- **Error slug extraction** now reads the gateway's `error` field first
+  (the documented machine-readable code, e.g. `rate-limit-exceeded`,
+  `tmn-voucher-not-found`), with `slug` kept as a legacy fallback.
+
+### Added
+- **`phone` is now optional in `truemoney()`.** Per the gateway docs, when
+  omitted the `phone` field is left out of the request and the server's
+  configured wallet number is used.
+
+### Fixed
+- Rate-limit documentation corrected to the gateway's actual limits
+  (tmn 200/min, slip 100/min) and the real `rate-limit-exceeded` error code.
+
 ## [3.1.0] — 2026-08-18
 
 ### Added

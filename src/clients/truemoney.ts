@@ -58,15 +58,21 @@ function normalizePhone(phone: string): { normalized?: string; error?: string } 
 
 export async function truemoney(
   codeOrLink: string,
-  phone: string,
+  phone?: string,
   options?: TruemoneyOptions
 ): Promise<TopupApiResponse | string> {
   if (typeof codeOrLink !== 'string' || codeOrLink.trim().length === 0) {
     throw new ValidationError('truemoney: code or gift URL is required');
   }
-  const { normalized: mobile, error: phoneError } = normalizePhone(phone);
-  if (phoneError || !mobile) {
-    throw new ValidationError(phoneError || 'truemoney: phone is invalid');
+  // phone is optional per the gateway docs: when omitted the server's
+  // configured wallet number is used.
+  let mobile: string | undefined;
+  if (phone !== undefined && phone.trim().length > 0) {
+    const { normalized, error: phoneError } = normalizePhone(phone);
+    if (phoneError || !normalized) {
+      throw new ValidationError(phoneError || 'truemoney: phone is invalid');
+    }
+    mobile = normalized;
   }
   if (options?.amount != null && (!Number.isFinite(options.amount) || options.amount < 0)) {
     throw new ValidationError('truemoney: amount must be a non-negative number');
@@ -74,10 +80,10 @@ export async function truemoney(
 
   const base = options?.baseUrl || TMN_BASE;
   const res = await post(
-    `${base}/tmn`,
+    base.replace(/\/+$/, '') + '/',
     {
-      code: codeOrLink.trim(),
-      mobile,
+      gift: codeOrLink.trim(),
+      ...(mobile !== undefined ? { phone: mobile } : undefined),
     },
     options
   );

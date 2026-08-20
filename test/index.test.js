@@ -15,37 +15,55 @@ const server = http.createServer((req, res) => {
     } catch {
       parsed = body;
     }
-    if (req.url === '/tmn' && parsed && parsed.code === 'fail') {
-      res.statusCode = 422;
-      res.end(JSON.stringify({ error: 'voucher not found' }));
-      return;
+
+    // The gateway is a single unified endpoint that auto-detects the service
+    // from the request body (https://zelthr.rest/docs/verify):
+    //   img | image                  -> slip verification
+    //   gift | code | voucher | link -> TrueMoney redemption
+    const voucher =
+      parsed && typeof parsed === 'object'
+        ? parsed.gift ?? parsed.code ?? parsed.voucher ?? parsed.link
+        : undefined;
+    const img =
+      parsed && typeof parsed === 'object' ? parsed.img ?? parsed.image : undefined;
+
+    if (img !== undefined) {
+      if (img === 'data:image/jpeg;base64,TEST') {
+        res.end(JSON.stringify({ success: true, amount: 80 }));
+        return;
+      }
+      if (img === 'data:image/jpeg;base64,NOAMOUNT') {
+        res.end(JSON.stringify({ success: true, data: {} }));
+        return;
+      }
     }
-    if (req.url === '/tmn' && parsed && parsed.code === 'redeem-100') {
-      res.end(JSON.stringify({ status: { code: 'SUCCESS' }, data: { redeem: { amount_baht: '100', amount: 100 } } }));
-      return;
+
+    if (voucher !== undefined) {
+      if (voucher === 'fail') {
+        res.statusCode = 422;
+        res.end(JSON.stringify({ error: 'tmn-voucher-not-found', message: 'voucher not found' }));
+        return;
+      }
+      if (voucher === 'redeem-100') {
+        res.end(JSON.stringify({ status: { code: 'SUCCESS' }, data: { redeem: { amount_baht: '100', amount: 100 } } }));
+        return;
+      }
+      if (voucher === 'redeem-no-amount') {
+        res.end(JSON.stringify({ status: { code: 'SUCCESS' }, data: {} }));
+        return;
+      }
+      if (voucher === 'redeem-fee-first') {
+        res.end(JSON.stringify({ fee: { amount: 50 }, amount: 100 }));
+        return;
+      }
+      if (voucher === 'REDIRECT') {
+        res.statusCode = 307;
+        res.setHeader('Location', 'http://127.0.0.1:9/evil');
+        res.end();
+        return;
+      }
     }
-    if (req.url === '/tmn' && parsed && parsed.code === 'redeem-no-amount') {
-      res.end(JSON.stringify({ status: { code: 'SUCCESS' }, data: {} }));
-      return;
-    }
-    if (req.url === '/tmn' && parsed && parsed.code === 'redeem-fee-first') {
-      res.end(JSON.stringify({ fee: { amount: 50 }, amount: 100 }));
-      return;
-    }
-    if (req.url === '/tmn' && parsed && parsed.code === 'REDIRECT') {
-      res.statusCode = 307;
-      res.setHeader('Location', 'http://127.0.0.1:9/evil');
-      res.end();
-      return;
-    }
-    if (req.url === '/slip' && parsed && parsed.img === 'data:image/jpeg;base64,TEST') {
-      res.end(JSON.stringify({ success: true, amount: 80 }));
-      return;
-    }
-    if (req.url === '/slip' && parsed && parsed.img === 'data:image/jpeg;base64,NOAMOUNT') {
-      res.end(JSON.stringify({ success: true, data: {} }));
-      return;
-    }
+
     const statusMatch = req.url.match(/^\/status\/(\d+)/);
     if (statusMatch) {
       const status = Number(statusMatch[1]);
@@ -56,7 +74,7 @@ const server = http.createServer((req, res) => {
       }
       res.end(
         JSON.stringify({
-          slug: status === 429 ? 'rate-limited' : 'http-error',
+          error: status === 429 ? 'rate-limit-exceeded' : 'http-error',
           message: `HTTP ${status}`,
         })
       );
@@ -96,40 +114,47 @@ function api() {
   return require('../dist/index.js');
 }
 
-test('truemoney posts {code, mobile} to /tmn', async () => {
+test('truemoney posts {gift, phone} to the unified endpoint', async () => {
   const res = await api().truemoney('ABCD1234EFGH', '0812345678');
   assert.equal(res.method, 'POST');
-  assert.equal(res.url, '/tmn');
-  assert.deepEqual(res.body, { code: 'ABCD1234EFGH', mobile: '0812345678' });
+  assert.equal(res.url, '/');
+  assert.deepEqual(res.body, { gift: 'ABCD1234EFGH', phone: '0812345678' });
+});
+
+test('truemoney omits phone when not provided (server uses its configured wallet)', async () => {
+  const res = await api().truemoney('ABCD1234EFGH');
+  assert.equal(res.url, '/');
+  assert.deepEqual(res.body, { gift: 'ABCD1234EFGH' });
+  assert.equal('phone' in res.body, false);
 });
 
 test('truemoney sends the raw gift link as-is (no path encoding — JSON body)', async () => {
   const link = 'https://gift.truemoney.com/campaign/?v=XXXX';
   const res = await api().truemoney(link, '0812345678');
-  assert.equal(res.url, '/tmn');
-  assert.equal(res.body.code, link);
+  assert.equal(res.url, '/');
+  assert.equal(res.body.gift, link);
 });
 
 test('truemoney normalizes spaced, hyphenated, and parenthesized phone numbers', async () => {
   const res1 = await api().truemoney('ABCD1234', ' 081 234 5678 ');
-  assert.equal(res1.body.mobile, '0812345678');
+  assert.equal(res1.body.phone, '0812345678');
 
   const res2 = await api().truemoney('ABCD1234', '081-234-5678');
-  assert.equal(res2.body.mobile, '0812345678');
+  assert.equal(res2.body.phone, '0812345678');
 
   const res3 = await api().truemoney('ABCD1234', '(081) 234-5678');
-  assert.equal(res3.body.mobile, '0812345678');
+  assert.equal(res3.body.phone, '0812345678');
 });
 
 test('truemoney normalizes international +66 and 66 phone numbers', async () => {
   const res1 = await api().truemoney('ABCD1234', '+66812345678');
-  assert.equal(res1.body.mobile, '0812345678');
+  assert.equal(res1.body.phone, '0812345678');
 
   const res2 = await api().truemoney('ABCD1234', '+66 81-234-5678');
-  assert.equal(res2.body.mobile, '0812345678');
+  assert.equal(res2.body.phone, '0812345678');
 
   const res3 = await api().truemoney('ABCD1234', '66812345678');
-  assert.equal(res3.body.mobile, '0812345678');
+  assert.equal(res3.body.phone, '0812345678');
 });
 
 test('truemoney amount check passes when the redeemed amount matches', async () => {
@@ -181,7 +206,11 @@ test('truemoney rejects an invalid expected amount', async () => {
 test('truemoney surfaces gateway errors with status and body', async () => {
   await assert.rejects(
     () => api().truemoney('fail', '0812345678'),
-    (err) => err instanceof api().HttpError && err.status === 422 && err.body.error === 'voucher not found'
+    (err) =>
+      err instanceof api().HttpError &&
+      err.status === 422 &&
+      err.slug === 'tmn-voucher-not-found' &&
+      err.body.error === 'tmn-voucher-not-found'
   );
 });
 
@@ -194,11 +223,11 @@ test('truemoney supports custom baseUrl and headers option', async () => {
   assert.equal(res.headers['x-client-ver'], '3.0.0');
 });
 
-test('bank posts the image as {img} data URI to /slip', async () => {
+test('bank posts the image as {img} data URI to the unified endpoint', async () => {
   const img = 'data:image/jpeg;base64,AAAA';
   const res = await api().bank(img);
   assert.equal(res.method, 'POST');
-  assert.equal(res.url, '/slip');
+  assert.equal(res.url, '/');
   assert.equal(res.body.img, img);
   assert.equal(res.body.tos, undefined);
 });
@@ -303,7 +332,7 @@ test('bank non-2xx throws an HttpError with status/slug/body', async () => {
   assert.ok(err instanceof api().HttpError);
   assert.equal(err.status, 401);
   assert.equal(err.slug, 'http-error');
-  assert.equal(err.body.slug, 'http-error');
+  assert.equal(err.body.error, 'http-error');
 });
 
 test('HTTP 429 is surfaced as a rate-limit slug', async () => {
@@ -313,7 +342,7 @@ test('HTTP 429 is surfaced as a rate-limit slug', async () => {
     .catch((e) => e);
   assert.ok(err instanceof api().HttpError);
   assert.equal(err.status, 429);
-  assert.equal(err.slug, 'rate-limited');
+  assert.equal(err.slug, 'rate-limit-exceeded');
 });
 
 test('HTTP 500 with a non-JSON body keeps status and raw body', async () => {

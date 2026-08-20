@@ -22,12 +22,21 @@ const cjs = require('@zelthr/topup');
 assert.strictEqual(cjs.truemoney, truemoney);
 assert.strictEqual(cjs.HttpError, HttpError);
 
-const res = await truemoney('0000000000000000', '0812345678');
-assert.ok(res !== null && typeof res === 'object', `expected an object, got ${res}`);
-assert.ok(typeof res.status?.code === 'string', `expected a status.code, got ${JSON.stringify(res)}`);
+// A fake voucher must reach the unified gateway endpoint and come back as a
+// structured response: either a resolved object or an HttpError carrying the
+// gateway's machine-readable `error` code. A 404 (removed route) would fail.
+const tmn = await truemoney('0000000000000000', '0812345678').catch((e) => e);
+if (tmn instanceof HttpError) {
+  assert.notEqual(tmn.status, 404, `unified endpoint returned 404: ${tmn.message}`);
+  assert.ok(typeof tmn.slug === 'string' && tmn.slug.length > 0, `expected a slug, got ${JSON.stringify(tmn.body)}`);
+} else {
+  assert.ok(tmn !== null && typeof tmn === 'object', `expected an object, got ${tmn}`);
+}
 
-const err = await post('https://api.zelthr.rest/tmn', { code: 'x' }).catch((e) => e);
+// An empty body on the unified endpoint is a documented 400 bad-request.
+const err = await post('https://api.zelthr.rest/', {}).catch((e) => e);
 assert.ok(err instanceof HttpError, `expected HttpError, got ${err}`);
 assert.equal(err.status, 400);
+assert.equal(err.slug, 'bad-request');
 
 console.log('ESM consumer smoke: OK');

@@ -6,10 +6,12 @@ The package does **no local work**: every call is forwarded to the gateway, whic
 
 ## Endpoints
 
-| Function | Gateway route | Purpose |
+Both services share the gateway's single unified verification endpoint (`POST /`); the gateway auto-detects which service to run from the request body.
+
+| Function | Request body | Purpose |
 | --- | --- | --- |
-| `truemoney(code, phone, options?)` | `POST /tmn` | Check / redeem a TrueMoney voucher code |
-| `bank(data, options?)` | `POST /slip` | Verify a Thai bank transfer slip from an image |
+| `truemoney(code, phone, options?)` | `{ gift, phone }` | Check / redeem a TrueMoney voucher code |
+| `bank(data, options?)` | `{ img }` | Verify a Thai bank transfer slip from an image |
 
 ## Requirements
 
@@ -63,12 +65,12 @@ Bare base64 strings, `Buffer`, `Uint8Array`, and `ArrayBuffer` are handled autom
 
 ### `truemoney(codeOrLink, phone, options?)`
 
-Redeems a TrueMoney voucher via `POST /tmn`.
+Redeems a TrueMoney voucher via the unified endpoint (`POST /`).
 
 | arg | type | description |
 | --- | --- | --- |
 | `codeOrLink` | `string` | Gift code (e.g. `ABCD1234EFGH`) or full gift URL. |
-| `phone` | `string` | Thai mobile number (`08x...`, `+668x...`, `08x-xxx-xxxx`); formatting and whitespace are normalized automatically. |
+| `phone` | `string` | Optional. Thai mobile number (`08x...`, `+668x...`, `08x-xxx-xxxx`); formatting and whitespace are normalized automatically. If omitted, the server's configured wallet number is used. |
 | `options.amount` | `number` | Optional. If set, the redeemed amount is compared against it and a mismatch throws `AmountMismatchError` (`slug === 'amount-mismatch'`). |
 | `options.timeoutMs` | `number` | Optional request deadline in milliseconds (default: 30000). |
 | `options.baseUrl` | `string` | Optional base URL override (default: `https://api.zelthr.rest`). |
@@ -77,15 +79,15 @@ Redeems a TrueMoney voucher via `POST /tmn`.
 Under the hood:
 
 ```
-POST https://api.zelthr.rest/tmn
-{ "code": "ABCD1234EFGH", "mobile": "0812345678" }
+POST https://api.zelthr.rest/
+{ "gift": "ABCD1234EFGH", "phone": "0812345678" }
 ```
 
 Returns the gateway JSON response (the upstream redeem result as-is). A non-existent voucher is a normal `200` with `status.code === 'VOUCHER_NOT_FOUND'` — HTTP 4xx/5xx means the request itself was rejected or the upstream failed.
 
 ### `bank(data, options?)`
 
-Verifies a Thai bank transfer slip via `POST /slip`. The gateway decodes the QR, extracts the amount and verifies it upstream.
+Verifies a Thai bank transfer slip via the unified endpoint (`POST /`). The gateway decodes the QR, extracts the amount and verifies it upstream.
 
 | arg | type | description |
 | --- | --- | --- |
@@ -98,11 +100,11 @@ Verifies a Thai bank transfer slip via `POST /slip`. The gateway decodes the QR,
 Under the hood:
 
 ```
-POST https://api.zelthr.rest/slip
+POST https://api.zelthr.rest/
 { "img": "data:image/jpeg;base64,/9j/4AAQ..." }
 ```
 
-Returns the upstream verified-slip result as-is. Throws `ValidationError` on empty input or oversized payloads, and `HttpError` on gateway failures (e.g. `400 invalid-image`, `429` rate limit, `503` OCR pipeline busy).
+Returns the upstream verified-slip result as-is. Throws `ValidationError` on empty input or oversized payloads, and `HttpError` on gateway failures (e.g. `400 invalid-image`, `422 qr-not-found`, `429 rate-limit-exceeded`, `502 upstream-error`).
 
 ### Low-level helpers
 
@@ -136,7 +138,7 @@ try {
 
 ## Rate limits
 
-The gateway enforces per-IP limits — tmn: 60/min, slip: 20/min — and returns `429` with `Retry-After` when exceeded, surfaced as an `HttpError` with `slug === 'rate-limited'`.
+The gateway enforces per-IP limits — tmn: 200/min, slip: 100/min — and returns `429` with a `Retry-After` header when exceeded, surfaced as an `HttpError` with `slug === 'rate-limit-exceeded'`.
 
 ## Environment variables
 

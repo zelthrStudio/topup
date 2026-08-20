@@ -125,9 +125,21 @@ export async function post(
     }
     if (typeof payload === 'object' && payload !== null) {
       const record = payload as Record<string, unknown>;
-      throw new HttpError(capText(String(record.slug || record.message || record.error || `HTTP ${status}`)), {
+      // The gateway reports the machine-readable code in `error`
+      // (https://zelthr.rest/docs/errors); `slug` is kept as a legacy fallback.
+      const code =
+        typeof record.error === 'string' && record.error !== ''
+          ? record.error
+          : typeof record.slug === 'string' && record.slug !== ''
+            ? record.slug
+            : undefined;
+      const message =
+        code ??
+        (typeof record.message === 'string' && record.message !== '' ? record.message : undefined) ??
+        `HTTP ${status}`;
+      throw new HttpError(capText(String(message)), {
         status,
-        slug: typeof record.slug === 'string' ? capText(record.slug) : undefined,
+        slug: code !== undefined ? capText(code) : undefined,
         body: payload,
       });
     }
